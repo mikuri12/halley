@@ -1,0 +1,218 @@
+use std::cell::RefCell;
+use std::collections::HashSet;
+use std::error::Error;
+use std::rc::Rc;
+
+use calloop::ping::Ping;
+use smithay::backend::drm::{DrmDeviceFd, DrmNode};
+use smithay::backend::renderer::ImportDma;
+use smithay::backend::renderer::gles::GlesRenderer;
+use smithay::backend::renderer::multigpu::GpuManager;
+use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
+use smithay::backend::winit::WinitGraphicsBackend;
+use smithay::backend::{allocator::Format, allocator::dmabuf::Dmabuf};
+
+use crate::compositor::interaction::ResizeCtx;
+use crate::compositor::root::Halley;
+use crate::render::draw_debug_frame;
+use std::cell::Cell;
+
+#[derive(Default)]
+pub(crate) struct TtyRedrawRequests {
+    all_outputs: bool,
+    outputs: HashSet<String>,
+}
+
+impl TtyRedrawRequests {
+    pub(crate) fn mark_all_outputs(&mut self) {
+        self.all_outputs = true;
+    }
+
+    pub(crate) fn take_all_outputs(&mut self) -> bool {
+        std::mem::take(&mut self.all_outputs)
+    }
+
+    pub(crate) fn mark_output(&mut self, output_name: &str) {
+        self.outputs.insert(output_name.to_string());
+    }
+
+    pub(crate) fn take_outputs(&mut self) -> HashSet<String> {
+        std::mem::take(&mut self.outputs)
+    }
+}
+
+pub(crate) trait BackendView {
+    fn window_size_i32(&self) -> (i32, i32);
+    fn request_redraw(&self);
+
+    fn request_output_redraw(&self, _output_name: &str) {
+        self.request_redraw();
+    }
+}
+
+pub(crate) trait RenderBackend: BackendView {
+    fn draw_frame(
+        &self,
+        st: &mut Halley,
+        resize_preview: Option<ResizeCtx>,
+        hover_node: Option<halley_core::field::NodeId>,
+        preview_hover_node: Option<halley_core::field::NodeId>,
+    ) -> Result<(), Box<dyn Error>>;
+}
+
+pub(crate) trait DmabufImportBackend {
+    fn dmabuf_formats(&self) -> Vec<Format>;
+    fn import_dmabuf(&self, dmabuf: &Dmabuf) -> Result<(), Box<dyn Error>>;
+}
+
+pub(crate) struct CaptureDmabufResult {
+    pub(crate) captured_at: std::time::SystemTime,
+}
+
+#[derive(Clone)]
+pub(crate) struct TtyBackendHandle {
+    size: Rc<Cell<(i32, i32)>>,
+    redraw_ping: Rc<RefCell<Option<Rc<Ping>>>>,
+    redraw_requests: Rc<RefCell<TtyRedrawRequests>>,
+}
+
+impl TtyBackendHandle {
+    pub(crate) fn new(width: i32, height: i32) -> Self {
+        Self {
+            size: Rc::new(Cell::new((width, height))),
+            redraw_ping: Rc::new(RefCell::new(None)),
+            redraw_requests: Rc::new(RefCell::new(TtyRedrawRequests::default())),
+        }
+    }
+
+    pub(crate) fn set_size(&self, width: i32, height: i32) {
+        self.size.set((width, height));
+    }
+
+    pub(crate) fn set_redraw_ping(&self, redraw_ping: Rc<Ping>) {
+        *self.redraw_ping.borrow_mut() = Some(redraw_ping);
+    }
+
+    pub(crate) fn take_redraw_all_outputs(&self) -> bool {
+        self.redraw_requests.borrow_mut().take_all_outputs()
+    }
+
+    pub(crate) fn take_redraw_outputs(&self) -> HashSet<String> {
+        self.redraw_requests.borrow_mut().take_outputs()
+    }
+}
+
+impl BackendView for TtyBackendHandle {
+    fn window_size_i32(&self) -> (i32, i32) {
+        self.size.get()
+    }
+
+    fn request_redraw(&self) {
+        self.redraw_requests.borrow_mut().mark_all_outputs();
+        if let Some(redraw_ping) = self.redraw_ping.borrow().as_ref() {
+            redraw_ping.ping();
+        }
+    }
+
+    fn request_output_redraw(&self, output_name: &str) {
+        self.redraw_requests.borrow_mut().mark_output(output_name);
+        if let Some(redraw_ping) = self.redraw_ping.borrow().as_ref() {
+            redraw_ping.ping();
+        }
+    }
+}
+
+pub(crate) struct TtyDmabufImportBackend {
+    gpu_manager: Rc<RefCell<GpuManager<GbmGlesBackend<GlesRenderer, DrmDeviceFd>>>>,
+    primary_render_node: DrmNode,
+}
+
+impl TtyDmabufImportBackend {
+    pub(crate) fn new(
+        gpu_manager: Rc<RefCell<GpuManager<GbmGlesBackend<GlesRenderer, DrmDeviceFd>>>>,
+        primary_render_node: DrmNode,
+    ) -> Self {
+        Self {
+            gpu_manager,
+            primary_render_node,
+        }
+    }
+}
+
+impl DmabufImportBackend for TtyDmabufImportBackend {
+    fn dmabuf_formats(&self) -> Vec<Format> {
+        let mut gpu_manager = self.gpu_manager.borrow_mut();
+        gpu_manager
+            .single_renderer(&self.primary_render_node)
+            .map(|renderer| renderer.dmabuf_formats().iter().copied().collect())
+            .unwrap_or_default()
+    }
+
+    fn import_dmabuf(&self, dmabuf: &Dmabuf) -> Result<(), Box<dyn Error>> {
+        let mut gpu_manager = self.gpu_manager.borrow_mut();
+        let mut renderer = gpu_manager.single_renderer(&self.primary_render_node)?;
+        renderer.import_dmabuf(dmabuf, None)?;
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct WinitBackendHandle {
+    inner: Rc<RefCell<WinitGraphicsBackend<GlesRenderer>>>,
+}
+
+impl WinitBackendHandle {
+    pub(crate) fn new(inner: Rc<RefCell<WinitGraphicsBackend<GlesRenderer>>>) -> Self {
+        Self { inner }
+    }
+}
+
+impl DmabufImportBackend for WinitBackendHandle {
+    fn dmabuf_formats(&self) -> Vec<Format> {
+        self.inner
+            .borrow_mut()
+            .renderer()
+            .dmabuf_formats()
+            .iter()
+            .copied()
+            .collect()
+    }
+
+    fn import_dmabuf(&self, dmabuf: &Dmabuf) -> Result<(), Box<dyn Error>> {
+        self.inner
+            .borrow_mut()
+            .renderer()
+            .import_dmabuf(dmabuf, None)?;
+        Ok(())
+    }
+}
+
+impl BackendView for WinitBackendHandle {
+    fn window_size_i32(&self) -> (i32, i32) {
+        let size = self.inner.borrow().window_size();
+        (size.w, size.h)
+    }
+
+    fn request_redraw(&self) {
+        self.inner.borrow().window().request_redraw();
+    }
+}
+
+impl RenderBackend for WinitBackendHandle {
+    fn draw_frame(
+        &self,
+        st: &mut Halley,
+        resize_preview: Option<ResizeCtx>,
+        hover_node: Option<halley_core::field::NodeId>,
+        preview_hover_node: Option<halley_core::field::NodeId>,
+    ) -> Result<(), Box<dyn Error>> {
+        let mut backend = self.inner.borrow_mut();
+        draw_debug_frame(
+            &mut backend,
+            st,
+            resize_preview,
+            hover_node,
+            preview_hover_node,
+        )
+    }
+}

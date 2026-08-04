@@ -1,0 +1,1081 @@
+use super::*;
+
+use crate::input::ctx::InputCtx;
+use crate::protocol::wayland::portal;
+
+use crate::backend::interface::{
+    BackendView, DmabufImportBackend, RenderBackend, WinitBackendHandle,
+};
+use crate::compositor::exit_confirm;
+use crate::compositor::interaction::PointerState;
+use halley_api::{
+    ApiError, CompositorRequest, LogicalOutputInfo, ModeInfo, OutputInfo, OutputStatus, Request,
+    Response,
+};
+use smithay::backend::renderer::ImportEgl;
+use smithay::reexports::winit::dpi::LogicalSize;
+use smithay::reexports::winit::platform::wayland::WindowAttributesExtWayland;
+use smithay::reexports::winit::window::Window;
+
+const CONFIG_RELOAD_SETTLE_MS: u64 = 100;
+
+struct WinitOutputCaptureBackend {
+    backend: Rc<RefCell<smithay::backend::winit::WinitGraphicsBackend<GlesRenderer>>>,
+    pointer_state: Rc<RefCell<PointerState>>,
+    dmabuf_formats: Vec<smithay::backend::allocator::Format>,
+}
+
+impl WinitOutputCaptureBackend {
+    fn new(
+        backend: Rc<RefCell<smithay::backend::winit::WinitGraphicsBackend<GlesRenderer>>>,
+        pointer_state: Rc<RefCell<PointerState>>,
+        dmabuf_formats: Vec<smithay::backend::allocator::Format>,
+    ) -> Self {
+        Self {
+            backend,
+            pointer_state,
+            dmabuf_formats,
+        }
+    }
+}
+
+impl portal::OutputCaptureBackend for WinitOutputCaptureBackend {
+    fn capture_dmabuf_formats(&self) -> Vec<smithay::backend::allocator::Format> {
+        self.dmabuf_formats.clone()
+    }
+
+    fn capture_output_shm(
+        &self,
+        st: &mut Halley,
+        output_name: &str,
+        overlay_cursor: bool,
+        logical_region: Option<smithay::utils::Rectangle<i32, smithay::utils::Logical>>,
+    ) -> Result<portal::ShmCaptureFrame, Box<dyn Error>> {
+        let mut backend = self
+            .backend
+            .try_borrow_mut()
+            .map_err(|_| io::Error::other("winit renderer already borrowed during screencopy"))?;
+        let size = backend.window_size();
+        let physical_size: smithay::utils::Size<i32, smithay::utils::Physical> =
+            (size.w.max(1), size.h.max(1)).into();
+        let ps = self
+            .pointer_state
+            .try_borrow()
+            .map_err(|_| io::Error::other("pointer state already borrowed during screencopy"))?;
+        let now = Instant::now();
+        let resize_preview = ps.resize;
+        let (hover_node, preview_hover_node) = resolve_hover_targets(st, &ps, now);
+        let cursor_screen = overlay_cursor.then_some(ps.screen);
+        drop(ps);
+
+        portal::capture_output_via_renderer(
+            backend.renderer(),
+            st,
+            output_name,
+            physical_size,
+            st.output_transform_for(output_name),
+            resize_preview,
+            hover_node,
+            preview_hover_node,
+            cursor_screen,
+            overlay_cursor,
+            logical_region,
+            None,
+        )
+    }
+
+    fn capture_output_dmabuf(
+        &self,
+        st: &mut Halley,
+        output_name: &str,
+        overlay_cursor: bool,
+        logical_region: Option<smithay::utils::Rectangle<i32, smithay::utils::Logical>>,
+        dmabuf: &mut smithay::backend::allocator::dmabuf::Dmabuf,
+    ) -> Result<crate::backend::interface::CaptureDmabufResult, Box<dyn Error>> {
+        let mut backend = self.backend.try_borrow_mut().map_err(|_| {
+            io::Error::other("winit renderer already borrowed during dma-buf screencopy")
+        })?;
+        let size = backend.window_size();
+        let physical_size: smithay::utils::Size<i32, smithay::utils::Physical> =
+            (size.w.max(1), size.h.max(1)).into();
+        let ps = self.pointer_state.try_borrow().map_err(|_| {
+            io::Error::other("pointer state already borrowed during dma-buf screencopy")
+        })?;
+        let now = Instant::now();
+        let resize_preview = ps.resize;
+        let (hover_node, preview_hover_node) = resolve_hover_targets(st, &ps, now);
+        let cursor_screen = overlay_cursor.then_some(ps.screen);
+        drop(ps);
+
+        portal::capture_output_into_dmabuf_via_renderer(
+            backend.renderer(),
+            st,
+            output_name,
+            physical_size,
+            st.output_transform_for(output_name),
+            resize_preview,
+            hover_node,
+            preview_hover_node,
+            cursor_screen,
+            overlay_cursor,
+            logical_region,
+            dmabuf,
+        )
+    }
+
+    fn capture_window_png(
+        &self,
+        st: &mut Halley,
+        output_name: &str,
+        node_id: halley_core::field::NodeId,
+        output_path: &std::path::Path,
+    ) -> Result<(), Box<dyn Error>> {
+        let mut backend = self.backend.try_borrow_mut().map_err(|_| {
+            io::Error::other("winit renderer already borrowed during window capture")
+        })?;
+        crate::window::capture_window_to_png_via_renderer(
+            backend.renderer(),
+            st,
+            output_name,
+            node_id,
+            output_path,
+        )
+    }
+}
+
+fn apply_host_cursor(
+    backend: &Rc<RefCell<smithay::backend::winit::WinitGraphicsBackend<GlesRenderer>>>,
+    image: &smithay::input::pointer::CursorImageStatus,
+) {
+    let backend = backend.borrow();
+    let window = backend.window();
+    match image {
+        smithay::input::pointer::CursorImageStatus::Hidden => {
+            window.set_cursor_visible(false);
+        }
+        smithay::input::pointer::CursorImageStatus::Named(icon) => {
+            window.set_cursor_visible(true);
+            window.set_cursor(*icon);
+        }
+        _ => {
+            window.set_cursor_visible(true);
+            window.set_cursor(smithay::input::pointer::CursorIcon::Default);
+        }
+    }
+}
+
+fn publish_winit_output_snapshot(
+    width: i32,
+    height: i32,
+    focused: bool,
+    offset_x: i32,
+    offset_y: i32,
+) {
+    let width = width.max(0) as u32;
+    let height = height.max(0) as u32;
+
+    publish_outputs(vec![OutputInfo {
+        name: "winit-0".to_string(),
+        status: OutputStatus::Connected,
+        enabled: true,
+        current_mode: Some(ModeInfo {
+            width,
+            height,
+            refresh_hz: None,
+            preferred: true,
+            current: true,
+        }),
+        modes: vec![ModeInfo {
+            width,
+            height,
+            refresh_hz: None,
+            preferred: true,
+            current: true,
+        }],
+        vrr_mode: None,
+        vrr_support: None,
+        direct_scanout_candidate_node: None,
+        direct_scanout_active_node: None,
+        direct_scanout_reason: None,
+        logical: Some(LogicalOutputInfo {
+            scale: 1.0,
+            focused,
+            offset_x,
+            offset_y,
+        }),
+    }]);
+}
+
+fn warn_winit_physical_input_settings_ignored(input: &halley_config::InputConfig, source: &str) {
+    if input.has_physical_device_settings() {
+        warn!(
+            "{}: input.touchpad/input.mouse/input.devices are ignored by the winit backend; configure physical input devices in the host compositor or run Halley on tty",
+            source
+        );
+    }
+}
+
+fn apply_winit_reload(
+    backend: &Rc<RefCell<smithay::backend::winit::WinitGraphicsBackend<GlesRenderer>>>,
+    st: &mut Halley,
+    mut next: RuntimeTuning,
+    config_path: &str,
+    _wayland_display: &str,
+    reason: &str,
+) {
+    let ws = backend.borrow().window_size();
+    next.viewport_size = halley_core::field::Vec2 {
+        x: ws.w.max(1) as f32,
+        y: ws.h.max(1) as f32,
+    };
+    let live_camera = crate::bootstrap::capture_live_camera_state(st);
+    st.apply_tuning(next);
+    crate::bootstrap::restore_live_camera_state(st, live_camera);
+    warn_winit_physical_input_settings_ignored(&st.runtime.tuning.input, reason);
+    crate::compositor::spawn::state::recompute_all_node_rule_opacities(st);
+    st.ui.render_state.clear_window_offscreen_caches();
+    st.request_maintenance();
+    st.advertise_output(
+        "winit-0",
+        smithay::output::Mode {
+            size: (ws.w.max(1), ws.h.max(1)).into(),
+            refresh: 0,
+        },
+    );
+    debug!(
+        "{}: reloaded config from {} with viewport {}x{}",
+        reason,
+        config_path,
+        ws.w.max(1),
+        ws.h.max(1)
+    );
+}
+
+pub(crate) fn run_winit_backend() -> Result<(), Box<dyn Error>> {
+    scope!(
+        "halley-wl",
+        success = "compositor exited",
+        failure = "compositor failed",
+        aborted = "compositor aborted",
+        {
+            ensure_xdg_runtime_dir()?;
+            ensure_dbus_session_bus_address();
+            init_logging()?;
+            info!("running nested winit backend");
+            let _host_backend_guard = ensure_host_display()?;
+
+            let mut display: Display<Halley> = Display::new()?;
+            let dh = display.handle();
+
+            let resolved_config_path = crate::bootstrap::ensure_default_user_config(None);
+            let config_source = resolved_config_path.source;
+            let config_path = Rc::new(resolved_config_path.path.to_string_lossy().to_string());
+            let aperture_config_path = Rc::new(crate::aperture::default_aperture_config_path());
+            let (tuning, startup_config_error) =
+                crate::bootstrap::load_startup_tuning(config_path.as_str());
+            let aperture_config =
+                crate::aperture::load_aperture_config_from_path(aperture_config_path.as_path());
+            tuning.apply_process_env();
+            if !Path::new(config_path.as_str()).exists() {
+                warn!(
+                    "config file not found at {}; using built-in defaults",
+                    config_path.as_str()
+                );
+            }
+            info!(
+                "config: using {} {}",
+                config_source.as_str(),
+                config_path.as_str()
+            );
+            info!(
+                "keyboard config: layout={} variant={} options={}",
+                tuning.input.keyboard.layout,
+                tuning.input.keyboard.variant,
+                tuning.input.keyboard.options
+            );
+            if !aperture_config_path.as_path().exists() {
+                warn!(
+                    "aperture config file not found at {}; using built-in defaults",
+                    aperture_config_path.display()
+                );
+            }
+            crate::aperture::log_aperture_config_startup(aperture_config_path.as_ref());
+            debug!("keybind modifier: {}", tuning.keybinds.modifier_name());
+            debug!("resolved keybinds: {}", tuning.keybinds_resolved_summary());
+            debug!("resolved zoom: {}", tuning.zoom_resolved_summary());
+            warn_winit_physical_input_settings_ignored(&tuning.input, "startup");
+
+            let (watch_rx, _watcher): (Option<mpsc::Receiver<()>>, Option<RecommendedWatcher>) = {
+                let (watch_tx, watch_rx) = mpsc::channel::<()>();
+                let mut config_watch_targets = vec![
+                    PathBuf::from(config_path.as_str()),
+                    aperture_config_path.as_ref().clone(),
+                ];
+                config_watch_targets.extend(halley_config::gather_dependencies_for_file(
+                    config_path.as_str(),
+                ));
+                // Also watch the aperture config's gather deps (e.g. pywal colours),
+                // otherwise a rewrite of the gathered cache file won't trigger a reload.
+                config_watch_targets.extend(halley_config::gather_dependencies_for_file(
+                    aperture_config_path.to_string_lossy().as_ref(),
+                ));
+                let config_watch_targets_for_callback = config_watch_targets.clone();
+                let mut watcher: RecommendedWatcher = notify::recommended_watcher(
+                    move |result: Result<notify::Event, notify::Error>| {
+                        if let Ok(event) = result {
+                            let touches_config = if event.paths.is_empty() {
+                                true
+                            } else {
+                                event.paths.iter().any(|path| {
+                                    crate::aperture::config_matches_event_path(
+                                        path,
+                                        &config_watch_targets_for_callback,
+                                    )
+                                })
+                            };
+                            if touches_config {
+                                match event.kind {
+                                    EventKind::Modify(_)
+                                    | EventKind::Create(_)
+                                    | EventKind::Remove(_) => {
+                                        let _ = watch_tx.send(());
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    },
+                )?;
+                for watch_root in crate::aperture::config_watch_roots(&config_watch_targets) {
+                    if let Err(err) =
+                        watcher.watch(watch_root.as_path(), RecursiveMode::NonRecursive)
+                    {
+                        warn!(
+                            "config watch disabled for {}: {}",
+                            watch_root.display(),
+                            err
+                        );
+                    }
+                }
+                (Some(watch_rx), Some(watcher))
+            };
+
+            info!("creating nested winit host window");
+            let window_attributes = Window::default_attributes()
+                .with_inner_size(LogicalSize::new(1280.0, 800.0))
+                .with_title("Halley")
+                .with_visible(true)
+                .with_name("halley", "");
+            let (backend, winit_source) = smithay_winit::init_from_attributes::<GlesRenderer>(
+                window_attributes,
+            )
+            .map_err(|err| {
+                let wayland_display =
+                    env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "<unset>".to_string());
+                let x11_display = env::var("DISPLAY").unwrap_or_else(|_| "<unset>".to_string());
+                io::Error::other(format!(
+                    "failed to initialize winit backend (WAYLAND_DISPLAY={}, DISPLAY={}): {}",
+                    wayland_display, x11_display, err
+                ))
+            })?;
+            info!(
+                "nested winit host window ready: {:?}",
+                backend.window_size()
+            );
+
+            let listening = ListeningSocketSource::new_auto().map_err(|err| {
+                let xdg_runtime_dir =
+                    env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "<unset>".to_string());
+                io::Error::other(format!(
+                    "failed to create nested WAYLAND listening socket (XDG_RUNTIME_DIR={}): {}",
+                    xdg_runtime_dir, err
+                ))
+            })?;
+            let sock_name = listening.socket_name().to_string_lossy().to_string();
+            info!("nested WAYLAND_DISPLAY={}", sock_name);
+            let backend = Rc::new(RefCell::new(backend));
+            let backend_handle = WinitBackendHandle::new(backend.clone());
+            let mut ev: EventLoop<Halley> = EventLoop::try_new()?;
+            let xwayland_event_loop = ev.handle();
+            let xwayland_event_loop_for_timer = xwayland_event_loop.clone();
+            let xwayland_watch_tokens = XwaylandSocketWatchTokens::default();
+            let xwayland_watch_tokens_for_timer = xwayland_watch_tokens.clone();
+            let _signal = ev.get_signal();
+            let mut state = Halley::new(&dh, ev.handle(), tuning.clone());
+            state.runtime.wayland_display = Some(sock_name.clone());
+            state.apply_aperture_config(aperture_config);
+            state.platform.seat.add_pointer();
+            state.platform.seat.add_touch();
+            super::initialize_seat_keyboard(&mut state);
+            let dmabuf_importer: Rc<dyn DmabufImportBackend> = Rc::new(backend_handle.clone());
+            {
+                let mut backend_ref = backend.borrow_mut();
+                match backend_ref.renderer().bind_wl_display(&dh) {
+                    Ok(_) => eventline::info!(
+                        "EGL hardware acceleration for Wayland clients enabled (winit)"
+                    ),
+                    Err(err) => eventline::info!(
+                        "EGL hardware acceleration for Wayland clients unavailable (winit); using fallback path: {err}"
+                    ),
+                }
+            }
+            state.configure_dmabuf_importer(dmabuf_importer, None);
+            let xwayland = Rc::new(RefCell::new(ensure_xwayland_satellite(sock_name.as_str())?));
+            let xwayland_for_timer = xwayland.clone();
+            {
+                let mut fresh = tuning.clone();
+                let ws = backend.borrow().window_size();
+                fresh.viewport_size = halley_core::field::Vec2 {
+                    x: ws.w.max(1) as f32,
+                    y: ws.h.max(1) as f32,
+                };
+                state.apply_tuning(fresh);
+                state.model.zoom_ref_size = halley_core::field::Vec2 {
+                    x: ws.w.max(1) as f32,
+                    y: ws.h.max(1) as f32,
+                };
+                crate::compositor::monitor::camera::snap_camera_targets_to_live(&mut state);
+                state.advertise_output(
+                    "winit-0",
+                    smithay::output::Mode {
+                        size: (ws.w.max(1), ws.h.max(1)).into(),
+                        refresh: 0,
+                    },
+                );
+                if let Some(diagnostic) = startup_config_error.as_ref() {
+                    crate::bootstrap::show_config_startup_error(&mut state, diagnostic);
+                }
+            }
+            if !state.runtime.tuning.autostart_once.is_empty() {
+                info!("nested winit backend: skipping session autostart");
+            }
+            apply_host_cursor(&backend, &state.effective_cursor_image_status());
+            let backend_for_winit = backend.clone();
+            let backend_for_timer = backend.clone();
+            let backend_for_cursor_timer = backend.clone();
+            let backend_for_output_timer = backend.clone();
+            let backend_handle_for_winit = backend_handle.clone();
+            let backend_handle_for_timer = backend_handle.clone();
+            let config_path_for_winit = config_path.clone();
+            let wayland_display_for_winit = sock_name.clone();
+            let wayland_display_for_timer = sock_name.clone();
+            let mod_state = Rc::new(RefCell::new(ModState::default()));
+            let mod_state_for_winit = mod_state.clone();
+            let pointer_state = Rc::new(RefCell::new(PointerState::default()));
+            let capture_dmabuf_formats = {
+                let mut backend_ref = backend.borrow_mut();
+                <GlesRenderer as smithay::backend::renderer::Bind<
+                    smithay::backend::allocator::dmabuf::Dmabuf,
+                >>::supported_formats(backend_ref.renderer())
+                .map(|formats| formats.iter().copied().collect())
+                .unwrap_or_default()
+            };
+            portal::configure_output_capture_backend(
+                &mut state,
+                Rc::new(WinitOutputCaptureBackend::new(
+                    backend.clone(),
+                    pointer_state.clone(),
+                    capture_dmabuf_formats,
+                )),
+            );
+            let mod_state_for_timer = mod_state.clone();
+            {
+                let ws = backend.borrow().window_size();
+                let mut ps = pointer_state.borrow_mut();
+                ps.workspace_size = (ws.w.max(1), ws.h.max(1));
+                ps.screen = ((ws.w as f32) * 0.5, (ws.h as f32) * 0.5);
+            }
+            let pointer_state_for_winit = pointer_state.clone();
+            let pointer_state_for_timer = pointer_state.clone();
+            let watch_rx = Rc::new(RefCell::new(watch_rx));
+            let watch_rx_for_timer = watch_rx.clone();
+            let pending_watch_reload_at = Rc::new(RefCell::new(None::<Instant>));
+            let pending_watch_reload_at_for_timer = pending_watch_reload_at.clone();
+            let config_path_for_timer = config_path.clone();
+            let aperture_config_path_for_timer = aperture_config_path.clone();
+            {
+                let ws = backend.borrow().window_size();
+                publish_winit_output_snapshot(ws.w, ws.h, true, 0, 0);
+            }
+
+            let mut dh_for_clients = dh.clone();
+            ev.handle()
+                .insert_source(listening, move |client_stream, _, _st| {
+                    let _ =
+                        dh_for_clients.insert_client(client_stream, Arc::new(ClientState::new()));
+                })?;
+
+            install_xwayland_socket_watchers(
+                &xwayland_event_loop,
+                &xwayland,
+                &xwayland_watch_tokens,
+            )?;
+
+            ev.handle()
+                .insert_source(winit_source, move |event, _, st| match event {
+                    WinitEvent::Redraw => {
+                        let ps = pointer_state_for_winit.borrow();
+                        let now = Instant::now();
+                        let resize_preview = ps.resize;
+                        let (hover_node, preview_hover_node) = resolve_hover_targets(st, &ps, now);
+                        if let Err(err) = backend_handle_for_winit.draw_frame(
+                            st,
+                            resize_preview,
+                            hover_node,
+                            preview_hover_node,
+                        ) {
+                            debug!("draw failed: {}", err);
+                        } else {
+                            crate::frame_loop::send_frame_callbacks(st, now);
+                            crate::frame_loop::send_presentation_feedback_for_output(st, "winit-0");
+                            crate::portal::capture_screencast_for_output(st, "winit-0");
+                        }
+                    }
+                    WinitEvent::Resized { size, .. } => {
+                        debug!("winit event: {:?}", event);
+                        st.model.zoom_ref_size = halley_core::field::Vec2 {
+                            x: size.w.max(1) as f32,
+                            y: size.h.max(1) as f32,
+                        };
+                        crate::compositor::monitor::camera::snap_camera_targets_to_live(&mut *st);
+                        st.advertise_output(
+                            "winit-0",
+                            smithay::output::Mode {
+                                size: (size.w.max(1), size.h.max(1)).into(),
+                                refresh: 0,
+                            },
+                        );
+                        {
+                            let mut ps = pointer_state_for_winit.borrow_mut();
+                            let (old_w, old_h) = ps.workspace_size;
+                            let new_w = size.w.max(1);
+                            let new_h = size.h.max(1);
+                            if old_w > 0 && old_h > 0 {
+                                let sx = ps.screen.0 * (new_w as f32) / (old_w as f32);
+                                let sy = ps.screen.1 * (new_h as f32) / (old_h as f32);
+                                let max_x = (new_w - 1) as f32;
+                                let max_y = (new_h - 1) as f32;
+                                ps.screen = (sx.clamp(0.0, max_x), sy.clamp(0.0, max_y));
+                            }
+                            ps.workspace_size = (new_w, new_h);
+                        }
+                        let ps = pointer_state_for_winit.borrow();
+                        let now = Instant::now();
+                        let resize_preview = ps.resize;
+                        let (hover_node, preview_hover_node) = resolve_hover_targets(st, &ps, now);
+                        if let Err(err) = backend_handle_for_winit.draw_frame(
+                            st,
+                            resize_preview,
+                            hover_node,
+                            preview_hover_node,
+                        ) {
+                            debug!("draw failed: {}", err);
+                        } else {
+                            crate::frame_loop::send_frame_callbacks(st, now);
+                            crate::frame_loop::send_presentation_feedback_for_output(st, "winit-0");
+                            crate::portal::capture_screencast_for_output(st, "winit-0");
+                        }
+                    }
+                    WinitEvent::Focus(false) => {
+                        debug!("winit event: {:?}", event);
+                        *mod_state_for_winit.borrow_mut() = ModState::default();
+                        let mut ps = pointer_state_for_winit.borrow_mut();
+                        if ps.resize.is_none() {
+                            crate::compositor::carry::system::set_drag_authority_node(st, None);
+                            ps.drag = None;
+                            ps.move_anim.clear();
+                            ps.panning = false;
+                        }
+                        st.set_app_focused(false);
+                    }
+                    WinitEvent::Focus(true) => {
+                        debug!("winit event: {:?}", event);
+                        st.set_app_focused(true);
+                        let now = Instant::now();
+                        if let Some(id) = st.last_input_surface_node() {
+                            st.set_interaction_focus(Some(id), 30_000, now);
+                        }
+                    }
+                    WinitEvent::CloseRequested => {
+                        debug!("winit event: {:?}", event);
+                        crate::compositor::runtime::request_exit(st);
+                    }
+                    WinitEvent::Input(InputEvent::Keyboard { event }) => {
+                        let code: u32 = event.key_code().into();
+                        let pressed = event.state() == KeyState::Pressed;
+                        let input_ctx = InputCtx {
+                            mod_state: &mod_state_for_winit,
+                            pointer_state: &pointer_state_for_winit,
+                            backend: &backend_handle_for_winit,
+                            config_path: config_path_for_winit.as_str(),
+                            wayland_display: wayland_display_for_winit.as_str(),
+                        };
+                        handle_backend_input_event(
+                            st,
+                            &input_ctx,
+                            BackendInputEventData::Keyboard { code, pressed },
+                        );
+                    }
+                    WinitEvent::Input(InputEvent::PointerMotionAbsolute { event }) => {
+                        let ws = backend_for_winit.borrow().window_size();
+                        let sx = event.x_transformed(ws.w) as f32;
+                        let sy = event.y_transformed(ws.h) as f32;
+                        let input_ctx = InputCtx {
+                            mod_state: &mod_state_for_winit,
+                            pointer_state: &pointer_state_for_winit,
+                            backend: &backend_handle_for_winit,
+                            config_path: config_path_for_winit.as_str(),
+                            wayland_display: wayland_display_for_winit.as_str(),
+                        };
+                        handle_backend_input_event(
+                            st,
+                            &input_ctx,
+                            BackendInputEventData::PointerMotionAbsolute {
+                                ws_w: ws.w,
+                                ws_h: ws.h,
+                                sx,
+                                sy,
+                                delta_x: 0.0,
+                                delta_y: 0.0,
+                                delta_x_unaccel: 0.0,
+                                delta_y_unaccel: 0.0,
+                                time_usec: smithay::backend::input::Event::<
+                                    smithay::backend::winit::WinitInput,
+                                >::time(&event),
+                            },
+                        );
+                    }
+                    WinitEvent::Input(InputEvent::PointerMotion { event }) => {
+                        let ws = backend_for_winit.borrow().window_size();
+                        if let Some((hint_sx, hint_sy)) =
+                            crate::compositor::interaction::state::take_pointer_screen_hint_request(
+                                st,
+                            )
+                        {
+                            let mut ps = pointer_state_for_winit.borrow_mut();
+                            ps.workspace_size = (ws.w, ws.h);
+                            ps.screen = (hint_sx, hint_sy);
+                            ps.world = crate::spatial::screen_to_world(
+                                st,
+                                ws.w.max(1),
+                                ws.h.max(1),
+                                hint_sx,
+                                hint_sy,
+                            );
+                        }
+                        let (last_sx, last_sy) = pointer_state_for_winit.borrow().screen;
+                        let sx = last_sx
+                            + smithay::backend::input::PointerMotionEvent::<
+                                smithay::backend::winit::WinitInput,
+                            >::delta_x(&event) as f32;
+                        let sy = last_sy
+                            + smithay::backend::input::PointerMotionEvent::<
+                                smithay::backend::winit::WinitInput,
+                            >::delta_y(&event) as f32;
+                        let input_ctx = InputCtx {
+                            mod_state: &mod_state_for_winit,
+                            pointer_state: &pointer_state_for_winit,
+                            backend: &backend_handle_for_winit,
+                            config_path: config_path_for_winit.as_str(),
+                            wayland_display: wayland_display_for_winit.as_str(),
+                        };
+                        handle_backend_input_event(
+                            st,
+                            &input_ctx,
+                            BackendInputEventData::PointerMotionAbsolute {
+                                ws_w: ws.w,
+                                ws_h: ws.h,
+                                sx,
+                                sy,
+                                delta_x: smithay::backend::input::PointerMotionEvent::<
+                                    smithay::backend::winit::WinitInput,
+                                >::delta_x(&event),
+                                delta_y: smithay::backend::input::PointerMotionEvent::<
+                                    smithay::backend::winit::WinitInput,
+                                >::delta_y(&event),
+                                delta_x_unaccel: smithay::backend::input::PointerMotionEvent::<
+                                    smithay::backend::winit::WinitInput,
+                                >::delta_x_unaccel(
+                                    &event
+                                ),
+                                delta_y_unaccel: smithay::backend::input::PointerMotionEvent::<
+                                    smithay::backend::winit::WinitInput,
+                                >::delta_y_unaccel(
+                                    &event
+                                ),
+                                time_usec: smithay::backend::input::Event::<
+                                    smithay::backend::winit::WinitInput,
+                                >::time(&event),
+                            },
+                        );
+                    }
+                    WinitEvent::Input(InputEvent::PointerButton { event }) => {
+                        let input_ctx = InputCtx {
+                            mod_state: &mod_state_for_winit,
+                            pointer_state: &pointer_state_for_winit,
+                            backend: &backend_handle_for_winit,
+                            config_path: config_path_for_winit.as_str(),
+                            wayland_display: wayland_display_for_winit.as_str(),
+                        };
+                        handle_backend_input_event(
+                            st,
+                            &input_ctx,
+                            BackendInputEventData::PointerButton {
+                                button_code: event.button_code(),
+                                state: event.state(),
+                            },
+                        );
+                    }
+                    WinitEvent::Input(InputEvent::PointerAxis { event }) => {
+                        let input_ctx = InputCtx {
+                            mod_state: &mod_state_for_winit,
+                            pointer_state: &pointer_state_for_winit,
+                            backend: &backend_handle_for_winit,
+                            config_path: config_path_for_winit.as_str(),
+                            wayland_display: wayland_display_for_winit.as_str(),
+                        };
+                        handle_backend_input_event(
+                            st,
+                            &input_ctx,
+                            BackendInputEventData::PointerAxis {
+                                source: event.source(),
+                                amount_v120_horizontal: event.amount_v120(Axis::Horizontal),
+                                amount_v120_vertical: event.amount_v120(Axis::Vertical),
+                                amount_horizontal: event.amount(Axis::Horizontal),
+                                amount_vertical: event.amount(Axis::Vertical),
+                                relative_direction_horizontal: event
+                                    .relative_direction(Axis::Horizontal),
+                                relative_direction_vertical: event
+                                    .relative_direction(Axis::Vertical),
+                            },
+                        );
+                    }
+                    WinitEvent::Input(InputEvent::TouchDown { event }) => {
+                        let ws = backend_for_winit.borrow().window_size();
+                        handle_backend_input_event(
+                            st,
+                            &InputCtx {
+                                mod_state: &mod_state_for_winit,
+                                pointer_state: &pointer_state_for_winit,
+                                backend: &backend_handle_for_winit,
+                                config_path: config_path_for_winit.as_str(),
+                                wayland_display: wayland_display_for_winit.as_str(),
+                            },
+                            BackendInputEventData::TouchDown {
+                                ws_w: ws.w,
+                                ws_h: ws.h,
+                                slot: event.slot(),
+                                sx: event.x_transformed(ws.w) as f32,
+                                sy: event.y_transformed(ws.h) as f32,
+                                time_msec: event.time_msec(),
+                            },
+                        );
+                    }
+                    WinitEvent::Input(InputEvent::TouchMotion { event }) => {
+                        let ws = backend_for_winit.borrow().window_size();
+                        handle_backend_input_event(
+                            st,
+                            &InputCtx {
+                                mod_state: &mod_state_for_winit,
+                                pointer_state: &pointer_state_for_winit,
+                                backend: &backend_handle_for_winit,
+                                config_path: config_path_for_winit.as_str(),
+                                wayland_display: wayland_display_for_winit.as_str(),
+                            },
+                            BackendInputEventData::TouchMotion {
+                                ws_w: ws.w,
+                                ws_h: ws.h,
+                                slot: event.slot(),
+                                sx: event.x_transformed(ws.w) as f32,
+                                sy: event.y_transformed(ws.h) as f32,
+                                time_msec: event.time_msec(),
+                            },
+                        );
+                    }
+                    WinitEvent::Input(InputEvent::TouchUp { event }) => {
+                        handle_backend_input_event(
+                            st,
+                            &InputCtx {
+                                mod_state: &mod_state_for_winit,
+                                pointer_state: &pointer_state_for_winit,
+                                backend: &backend_handle_for_winit,
+                                config_path: config_path_for_winit.as_str(),
+                                wayland_display: wayland_display_for_winit.as_str(),
+                            },
+                            BackendInputEventData::TouchUp {
+                                slot: event.slot(),
+                                time_msec: event.time_msec(),
+                            },
+                        );
+                    }
+                    WinitEvent::Input(InputEvent::TouchCancel { .. }) => {
+                        handle_backend_input_event(
+                            st,
+                            &InputCtx {
+                                mod_state: &mod_state_for_winit,
+                                pointer_state: &pointer_state_for_winit,
+                                backend: &backend_handle_for_winit,
+                                config_path: config_path_for_winit.as_str(),
+                                wayland_display: wayland_display_for_winit.as_str(),
+                            },
+                            BackendInputEventData::TouchCancel,
+                        );
+                    }
+                    _ => {}
+                })?;
+
+            let initial_frame_interval = frame_interval_for_refresh_hz(
+                state
+                    .runtime
+                    .tuning
+                    .tty_viewports
+                    .first()
+                    .and_then(|vp| vp.refresh_rate),
+            );
+            let timer = Timer::from_duration(initial_frame_interval);
+            ev.handle().insert_source(timer, move |_tick, _, st| {
+                if crate::compositor::interaction::state::take_input_state_reset_request(st) {
+                    mod_state_for_timer.borrow_mut().clear_intercepts();
+                    let mut ps = pointer_state_for_timer.borrow_mut();
+                    ps.intercepted_buttons.clear();
+                    ps.intercepted_binding_buttons.clear();
+                    ps.intercepted_buttons.clear();
+                    crate::compositor::carry::system::set_drag_authority_node(st, None);
+                    ps.drag = None;
+                    ps.move_anim.clear();
+                    ps.panning = false;
+                }
+                if let Some((sx, sy)) = crate::compositor::interaction::state::take_pointer_screen_hint_request(st) {
+                    let mut ps = pointer_state_for_timer.borrow_mut();
+                    let (ws_w, ws_h) = ps.workspace_size;
+                    ps.screen = (sx, sy);
+                    ps.world = crate::spatial::screen_to_world(st, ws_w.max(1), ws_h.max(1), sx, sy);
+                }
+                let now = Instant::now();
+                crate::compositor::platform::drain_drm_syncobj_blockers(st);
+
+                st.runtime.spawned_children.retain_mut(|child| {
+                    match child.try_wait() {
+                        Ok(Some(status)) => {
+                            debug!("reaped child pid={} status={}", child.id(), status);
+                            false
+                        }
+                        Ok(None) => true,
+                        Err(err) => {
+                            warn!("try_wait failed for child pid={}: {}", child.id(), err);
+                            false
+                        }
+                    }
+                });
+
+                drain_ipc_commands_with_fds(|request, fds| match request {
+                    Request::Compositor(CompositorRequest::Quit) => {
+                        info!("ipc: quit requested");
+                        exit_confirm::show(&mut *st);
+                        Response::Ok
+                    }
+                    Request::Compositor(CompositorRequest::Reload) => {
+                        let _ = crate::aperture::reload_aperture_config(
+                            st,
+                            aperture_config_path_for_timer.as_path(),
+                            "ipc",
+                        );
+                        match RuntimeTuning::try_load_from_path_diagnostic(config_path_for_timer.as_str()) {
+                            Ok(next) => {
+                                if crate::bootstrap::viewport_section_changed(&st.runtime.tuning, &next) {
+                                    apply_winit_reload(
+                                        &backend_for_timer,
+                                        st,
+                                        next,
+                                        config_path_for_timer.as_str(),
+                                        wayland_display_for_timer.as_str(),
+                                        "ipc",
+                                    );
+                                } else {
+                                    crate::bootstrap::apply_reloaded_tuning_without_autostart(
+                                        st,
+                                        next,
+                                        config_path_for_timer.as_str(),
+                                        "ipc",
+                                    );
+                                    warn_winit_physical_input_settings_ignored(
+                                        &st.runtime.tuning.input,
+                                        "ipc",
+                                    );
+                                }
+                            }
+                            Err(err) => {
+                                crate::bootstrap::show_config_reload_error(st, &err);
+                                warn!(
+                                    "ipc: reload skipped for {} because {}",
+                                    config_path_for_timer.as_str(), err.message
+                                );
+                            }
+                        }
+                        debug!("resolved keybinds: {}", st.runtime.tuning.keybinds_resolved_summary());
+                        debug!("resolved zoom: {}", st.runtime.tuning.zoom_resolved_summary());
+                        Response::Reloaded
+                    }
+                    Request::Compositor(CompositorRequest::Dpms {
+                        command,
+                        output,
+                    }) => {
+                        let target = output.unwrap_or_else(|| "all outputs".to_string());
+                        warn!(
+                            "ipc: ignoring tty-only dpms command on winit backend: {:?} ({})",
+                            command, target
+                        );
+                        Response::Error(ApiError::Unsupported(
+                            "dpms is only supported on the tty backend".into(),
+                        ))
+                    }
+                    request => crate::ipc::handle_request_with_fds(st, request, fds),
+                });
+
+                {
+                    let ws = backend_for_output_timer.borrow().window_size();
+                    publish_winit_output_snapshot(ws.w, ws.h, true, 0, 0);
+                }
+
+                xwayland_for_timer.borrow_mut().tick();
+                if let Err(err) = install_xwayland_socket_watchers(
+                    &xwayland_event_loop_for_timer,
+                    &xwayland_for_timer,
+                    &xwayland_watch_tokens_for_timer,
+                ) {
+                    warn!("failed to register X11 socket watchers: {}", err);
+                }
+                let resize_active = {
+                    let ps = pointer_state_for_timer.borrow();
+                    ps.resize.is_some()
+                };
+                crate::frame_loop::tick_frame_effects(st, now);
+                crate::frame_loop::tick_animator_frame(st, now);
+                st.tick_fullscreen_motion(now);
+                crate::frame_loop::begin_render_frame(st, now);
+                {
+                    let mut ps = pointer_state_for_timer.borrow_mut();
+                    let _ = advance_node_move_anim(st, &mut ps, now);
+                    let _ = advance_resize_anim(st, &mut ps, now);
+                }
+                crate::frame_loop::tick_live_overlap(st);
+                if !resize_active {
+                    st.run_maintenance_if_needed(now);
+                }
+
+                let mut reloaded = false;
+                let mut rx_ref = watch_rx_for_timer.borrow_mut();
+                if let Some(rx) = rx_ref.as_mut() {
+                    while rx.try_recv().is_ok() {
+                        *pending_watch_reload_at_for_timer.borrow_mut() =
+                            Some(now + Duration::from_millis(CONFIG_RELOAD_SETTLE_MS));
+                    }
+                }
+                if pending_watch_reload_at_for_timer
+                    .borrow()
+                    .is_some_and(|deadline| now >= deadline)
+                {
+                    *pending_watch_reload_at_for_timer.borrow_mut() = None;
+                    reloaded |= crate::aperture::reload_aperture_config(
+                        st,
+                        aperture_config_path_for_timer.as_path(),
+                        "watch",
+                    );
+                    match RuntimeTuning::try_load_from_path_diagnostic(config_path_for_timer.as_str()) {
+                        Ok(next) => {
+                            if crate::bootstrap::viewport_section_changed(&st.runtime.tuning, &next) {
+                                apply_winit_reload(
+                                    &backend_for_timer,
+                                    st,
+                                    next,
+                                    config_path_for_timer.as_str(),
+                                    wayland_display_for_timer.as_str(),
+                                    "watch",
+                                );
+                            } else {
+                                crate::bootstrap::apply_reloaded_tuning_without_autostart(
+                                    st,
+                                    next,
+                                    config_path_for_timer.as_str(),
+                                    "watch",
+                                );
+                                warn_winit_physical_input_settings_ignored(
+                                    &st.runtime.tuning.input,
+                                    "watch",
+                                );
+                            }
+                            reloaded = true;
+                        }
+                        Err(err) => {
+                            crate::bootstrap::show_config_reload_error(st, &err);
+                            warn!(
+                                "watch: reload skipped for {} because {}",
+                                config_path_for_timer.as_str(), err.message
+                            );
+                        }
+                    }
+                }
+                if reloaded {
+                    debug!("resolved keybinds: {}", st.runtime.tuning.keybinds_resolved_summary());
+                    debug!("resolved zoom: {}", st.runtime.tuning.zoom_resolved_summary());
+                }
+
+                {
+                    let mut ps = pointer_state_for_timer.borrow_mut();
+                    if let (Some(id), Some(until)) = (ps.resize_trace_node, ps.resize_trace_until) {
+                        if now >= until {
+                            ps.resize_trace_node = None;
+                            ps.resize_trace_until = None;
+                            ps.resize_trace_last_at = None;
+                        } else {
+                            let due = ps
+                                .resize_trace_last_at
+                                .is_none_or(|at| now.duration_since(at).as_millis() as u64 >= 120);
+                            if due {
+                                if let Some(n) = st.model.field.node(id) {
+                                    let surf = current_surface_size_for_node(st, id);
+                                    debug!(
+                                        "resize-trace id={} pos=({:.1},{:.1}) intrinsic=({:.1},{:.1}) surface={:?} state={:?}",
+                                        id.as_u64(),
+                                        n.pos.x,
+                                        n.pos.y,
+                                        n.intrinsic_size.x,
+                                        n.intrinsic_size.y,
+                                        surf.map(|v| (v.x, v.y)),
+                                        n.state,
+                                    );
+                                } else {
+                                    debug!("resize-trace id={} missing-node", id.as_u64());
+                                }
+                                ps.resize_trace_last_at = Some(now);
+                            }
+                        }
+                    }
+                }
+
+                apply_host_cursor(&backend_for_cursor_timer, &st.effective_cursor_image_status());
+                backend_handle_for_timer.request_redraw();
+                TimeoutAction::ToDuration(frame_interval_for_refresh_hz(
+                    st.runtime.tuning
+                        .tty_viewports
+                        .first()
+                        .and_then(|vp| vp.refresh_rate),
+                ))
+            })?;
+
+            info!("entering main loop");
+
+            loop {
+                ev.dispatch(None, &mut state)?;
+
+                if state.exit_requested() || crate::bootstrap::shutdown_requested() {
+                    info!("exit requested, shutting down main loop");
+                    break Ok(());
+                }
+
+                display.dispatch_clients(&mut state)?;
+                display.flush_clients()?;
+            }
+        }
+    )
+}

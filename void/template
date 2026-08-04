@@ -1,0 +1,61 @@
+# halley — Spatial Wayland compositor
+#
+# Derived from upstream Halley v0.5.0 (https://github.com/saltnpepper97/halley)
+# with the local halley-fixes.patch already applied:
+#   - direct-scanout no longer disabled by pending frame-callbacks
+#   - fullscreen apps cover the Top/Overlay layer-shell surfaces (render + hit-test)
+#   - send_pending_configure() dedup (Chromium toast spam)
+#   - animated XCursor support (multi-frame)
+#   - adaptive idle tick + display-fd in calloop (drops idle CPU)
+#
+# The src/ tree is the upstream v0.5.0 with halley-fixes.patch already applied,
+# so no patches= entry is needed here. Cargo.lock lives in src/.
+#
+# Build instructions (see ../void/README.md for the full flow):
+#   1. clone https://github.com/void-linux/void-packages
+#   2. mkdir srcpkgs/halley
+#   3. cp ../void/template            srcpkgs/halley/template
+#      cp ../void/halley-session      srcpkgs/halley/
+#      cp ../void/halley.desktop      srcpkgs/halley/
+#      cp ../void/halley.portal       srcpkgs/halley/
+#      cp ../void/halley-portals.conf srcpkgs/halley/
+#   4. ./xbps-src pkg halley
+#   5. sudo xbps-install --repository hostdir/binpkgs halley
+
+pkgname=halley
+version=0.5.0
+revision=1
+archs="x86_64*"
+build_style=cargo
+hostmakedepends="pkg-config rust cargo"
+makedepends="pkg-config clang18-devel libclang18 wayland-devel libxkbcommon-devel
+ libinput-devel libseat-devel libudev-devel libgbm-devel libdrm-devel
+ libglvnd-devel pixman-devel dbus-devel pipewire-devel"
+depends="xwayland-satellite dbus seatd"
+short_desc="Spatial Wayland compositor (mikuri's fork with local fixes)"
+maintainer="mikuri12 <https://github.com/mikuri12>"
+license="GPL-3.0-only"
+homepage="https://github.com/mikuri12/halley"
+
+do_build() {
+	cd "${wrksrc}/src"
+	cargo build --release
+}
+
+do_install() {
+	cd "${wrksrc}/src"
+	vbin target/release/halley halley
+	vbin target/release/halleyctl halleyctl
+	vbin target/release/xdg-desktop-portal-halley xdg-desktop-portal-halley
+	vbin ${wrksrc}/void/halley-session halley-session
+
+	vmkdir usr/share/wayland-sessions
+	vinstall ${wrksrc}/void/halley.desktop 644 usr/share/wayland-sessions halley.desktop
+
+	vmkdir usr/share/xdg-desktop-portal/portals
+	vinstall ${wrksrc}/void/halley.portal 644 usr/share/xdg-desktop-portal/portals halley.portal
+	vinstall ${wrksrc}/void/halley-portals.conf 644 usr/share/xdg-desktop-portal halley-portals.conf
+
+	vinstall ${wrksrc}/src/packaging/dbus-1/services/org.freedesktop.impl.portal.desktop.halley.service \
+		644 usr/share/dbus-1/services org.freedesktop.impl.portal.desktop.halley.service
+}

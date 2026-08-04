@@ -1,0 +1,44 @@
+#!/bin/sh
+# halley-session — wrapper for Void (runit, no systemd, no session D-Bus).
+#
+# Workaround for the "no signal" bug: when logging in via Noctalia/ly on
+# Void, halley-session starts WITHOUT a session D-Bus. Halley calls
+# `dbus-update-activation-environment` (blocking); without a bus,
+# dbus-launch falls back to X11 and hangs -> Halley's main thread gets
+# stuck in do_wait forever -> the monitor loses HDMI signal ("no signal").
+# Fix: if DBUS_SESSION_BUS_ADDRESS is unset, re-exec this wrapper under
+# dbus-run-session (same trick mango uses). On re-entry the env is set
+# and the guard is skipped.
+
+set -u
+
+export HALLEY_WL_BACKEND=tty
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=Halley
+export XDG_SESSION_DESKTOP=Halley
+export DESKTOP_SESSION=Halley
+
+export RUST_BACKTRACE=full
+export RUST_LOG=info
+
+if [ -n "${HOME:-}" ]; then
+    for dir in "$HOME/.npm-global/bin" "$HOME/.local/bin" "$HOME/.cargo/bin"; do
+        if [ -d "$dir" ]; then
+            case ":$PATH:" in
+                *":$dir:"*) ;;
+                *) PATH="$dir${PATH:+:$PATH}" ;;
+            esac
+        fi
+    done
+    export PATH
+fi
+
+HALLEY_BIN=${HALLEY_BIN:-/usr/bin/halley}
+
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+    if command -v dbus-run-session >/dev/null 2>&1; then
+        exec dbus-run-session -- "$0" "$@"
+    fi
+fi
+
+exec "$HALLEY_BIN" --session "$@"

@@ -1,0 +1,15 @@
+[package]
+name = "halley-api"
+version = "0.2.1"
+edition.workspace = true
+authors.workspace = true
+description = "Public API types for Halley compositor clients and tools."
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+exclude.workspace = true
+
+[dependencies]
+serde.workspace = true

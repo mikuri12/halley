@@ -1,0 +1,682 @@
+use std::collections::HashMap;
+
+use rune_cfg::RuneConfig;
+
+use crate::layout::{
+    AccelProfile, BlurMethod, ClickCollapsedOutsideFocusMode, ClickCollapsedPanMode, ClickMethod,
+    ClientBlurMode, CloseRestorePanMode, ClusterBloomDirection, ClusterDefaultLayout,
+    DecorationBorderColor, ExpandedPlacementStrategy, FindEmptyMode, FocusRingConfig,
+    InputFocusMode, LandmarkPlacementStrategy, NodeBackgroundColorMode, NodeBorderColorMode,
+    NodeDisplayPolicy, NormalBlockerPolicy, OverlayBorderSource, OverlayColorMode, OverlayShape,
+    PanToNewMode, PinBadgeCorner, PinnedBlockerPolicy, RaiseAnimationTrigger, ScrollMethod,
+    ShadowColor, ShapeStyle, TapButtonMap, WindowCloseAnimationStyle,
+};
+
+pub(crate) fn merge_env_map(cfg: &RuneConfig, out: &mut HashMap<String, String>, path: &str) {
+    let Ok(Some(entries)) = cfg.get_optional::<HashMap<String, String>>(path) else {
+        return;
+    };
+
+    for (key, value) in entries {
+        let key = key.trim();
+        let value = value.trim();
+        if key.is_empty() || value.is_empty() {
+            continue;
+        }
+        out.insert(key.to_string(), value.to_string());
+    }
+}
+
+pub(crate) fn pick_pan_to_new_mode(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: PanToNewMode,
+) -> PanToNewMode {
+    for path in paths {
+        if let Ok(Some(v)) = cfg.get_optional::<bool>(path) {
+            return if v {
+                PanToNewMode::Always
+            } else {
+                PanToNewMode::Never
+            };
+        }
+    }
+
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "never" => PanToNewMode::Never,
+        "if-needed" | "if_needed" => PanToNewMode::IfNeeded,
+        "always" => PanToNewMode::Always,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_close_restore_pan_mode(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: CloseRestorePanMode,
+) -> CloseRestorePanMode {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "never" => CloseRestorePanMode::Never,
+        "if-offscreen" | "if_offscreen" => CloseRestorePanMode::IfOffscreen,
+        "always" => CloseRestorePanMode::Always,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_expanded_placement_strategy(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: ExpandedPlacementStrategy,
+) -> ExpandedPlacementStrategy {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "center" => ExpandedPlacementStrategy::Center,
+        "find-empty" | "find_empty" => ExpandedPlacementStrategy::FindEmpty,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_find_empty_mode(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: FindEmptyMode,
+) -> FindEmptyMode {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "best-effort" | "best_effort" => FindEmptyMode::BestEffort,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_landmark_placement_strategy(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: LandmarkPlacementStrategy,
+) -> LandmarkPlacementStrategy {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "nearest-free" | "nearest_free" => LandmarkPlacementStrategy::NearestFree,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_normal_blocker_policy(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: NormalBlockerPolicy,
+) -> NormalBlockerPolicy {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "relocate" => NormalBlockerPolicy::Relocate,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_pinned_blocker_policy(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: PinnedBlockerPolicy,
+) -> PinnedBlockerPolicy {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "preserve" => PinnedBlockerPolicy::Preserve,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_click_collapsed_outside_focus_mode(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: ClickCollapsedOutsideFocusMode,
+) -> ClickCollapsedOutsideFocusMode {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "ignore" => ClickCollapsedOutsideFocusMode::Ignore,
+        "activate" => ClickCollapsedOutsideFocusMode::Activate,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_click_collapsed_pan_mode(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: ClickCollapsedPanMode,
+) -> ClickCollapsedPanMode {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "never" => ClickCollapsedPanMode::Never,
+        "if-offscreen" | "if_offscreen" => ClickCollapsedPanMode::IfOffscreen,
+        "always" => ClickCollapsedPanMode::Always,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_input_focus_mode(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: InputFocusMode,
+) -> InputFocusMode {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "click" => InputFocusMode::Click,
+        "hover" => InputFocusMode::Hover,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_cluster_bloom_direction(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: ClusterBloomDirection,
+) -> ClusterBloomDirection {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "clockwise" | "cw" => ClusterBloomDirection::Clockwise,
+        "counterclockwise" | "counter-clockwise" | "counter_clockwise" | "ccw" => {
+            ClusterBloomDirection::CounterClockwise
+        }
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_cluster_default_layout(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: ClusterDefaultLayout,
+) -> ClusterDefaultLayout {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "tiling" | "tile" => ClusterDefaultLayout::Tiling,
+        "stacking" | "stack" => ClusterDefaultLayout::Stacking,
+        _ => default,
+    }
+}
+
+pub(crate) fn parse_viewport_focus_ring(
+    cfg: &RuneConfig,
+    root: &str,
+    key: &str,
+) -> Option<FocusRingConfig> {
+    let ring_root = format!("{root}.{key}.focus-ring");
+    let rx = pick_f32(
+        cfg,
+        &[
+            format!("{ring_root}.rx").as_str(),
+            format!("{ring_root}.radius-x").as_str(),
+            format!("{ring_root}.radius_x").as_str(),
+            format!("{ring_root}.primary-rx").as_str(),
+            format!("{ring_root}.primary_rx").as_str(),
+        ],
+        0.0,
+    );
+    let ry = pick_f32(
+        cfg,
+        &[
+            format!("{ring_root}.ry").as_str(),
+            format!("{ring_root}.radius-y").as_str(),
+            format!("{ring_root}.radius_y").as_str(),
+            format!("{ring_root}.primary-ry").as_str(),
+            format!("{ring_root}.primary_ry").as_str(),
+        ],
+        0.0,
+    );
+    let offset_x = pick_f32(
+        cfg,
+        &[
+            format!("{ring_root}.offset-x").as_str(),
+            format!("{ring_root}.offset_x").as_str(),
+        ],
+        0.0,
+    );
+    let offset_y = pick_f32(
+        cfg,
+        &[
+            format!("{ring_root}.offset-y").as_str(),
+            format!("{ring_root}.offset_y").as_str(),
+        ],
+        0.0,
+    );
+
+    ((rx > 0.0) || (ry > 0.0) || offset_x != 0.0 || offset_y != 0.0).then_some(FocusRingConfig {
+        rx: if rx > 0.0 { rx } else { 820.0 },
+        ry: if ry > 0.0 { ry } else { 420.0 },
+        offset_x,
+        offset_y,
+    })
+}
+
+pub(crate) fn pick_u64(cfg: &RuneConfig, paths: &[&str], default: u64) -> u64 {
+    for path in paths {
+        if let Ok(Some(v)) = cfg.get_optional::<u64>(path) {
+            return v;
+        }
+    }
+    default
+}
+
+pub(crate) fn pick_f32(cfg: &RuneConfig, paths: &[&str], default: f32) -> f32 {
+    for path in paths {
+        if let Ok(Some(v)) = cfg.get_optional::<f32>(path) {
+            return v;
+        }
+    }
+    default
+}
+
+pub(crate) fn pick_u32(cfg: &RuneConfig, paths: &[&str], default: u32) -> u32 {
+    for path in paths {
+        if let Ok(Some(v)) = cfg.get_optional::<u32>(path) {
+            return v;
+        }
+    }
+    default
+}
+
+pub(crate) fn pick_i32(cfg: &RuneConfig, paths: &[&str], default: i32) -> i32 {
+    for path in paths {
+        if let Ok(Some(v)) = cfg.get_optional::<i32>(path) {
+            return v;
+        }
+    }
+    default
+}
+
+pub(crate) fn pick_bool(cfg: &RuneConfig, paths: &[&str], default: bool) -> bool {
+    for path in paths {
+        if let Ok(Some(v)) = cfg.get_optional::<bool>(path) {
+            return v;
+        }
+    }
+    default
+}
+
+pub(crate) fn pick_string(cfg: &RuneConfig, paths: &[&str]) -> Option<String> {
+    for path in paths {
+        if let Ok(Some(v)) = cfg.get_optional::<String>(path) {
+            return Some(v);
+        }
+    }
+    None
+}
+
+/// Presence-aware pickers: return `Some` only when the key is actually present, so input
+/// device settings left unset stay `None` (and libinput's own default is kept untouched).
+pub(crate) fn opt_bool(cfg: &RuneConfig, paths: &[&str]) -> Option<bool> {
+    for path in paths {
+        if let Ok(Some(v)) = cfg.get_optional::<bool>(path) {
+            return Some(v);
+        }
+    }
+    None
+}
+
+pub(crate) fn opt_u32(cfg: &RuneConfig, paths: &[&str]) -> Option<u32> {
+    for path in paths {
+        if let Ok(Some(v)) = cfg.get_optional::<u32>(path) {
+            return Some(v);
+        }
+    }
+    None
+}
+
+pub(crate) fn opt_f64(cfg: &RuneConfig, paths: &[&str]) -> Option<f64> {
+    for path in paths {
+        if let Ok(Some(v)) = cfg.get_optional::<f64>(path) {
+            return Some(v);
+        }
+    }
+    None
+}
+
+pub(crate) fn opt_accel_profile(cfg: &RuneConfig, paths: &[&str]) -> Option<AccelProfile> {
+    let raw = pick_string(cfg, paths)?;
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "adaptive" => Some(AccelProfile::Adaptive),
+        "flat" => Some(AccelProfile::Flat),
+        _ => None,
+    }
+}
+
+pub(crate) fn opt_scroll_method(cfg: &RuneConfig, paths: &[&str]) -> Option<ScrollMethod> {
+    let raw = pick_string(cfg, paths)?;
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "no-scroll" | "no_scroll" | "none" => Some(ScrollMethod::NoScroll),
+        "two-finger" | "two_finger" | "twofinger" => Some(ScrollMethod::TwoFinger),
+        "edge" => Some(ScrollMethod::Edge),
+        "on-button-down" | "on_button_down" | "button" => Some(ScrollMethod::OnButtonDown),
+        _ => None,
+    }
+}
+
+pub(crate) fn opt_click_method(cfg: &RuneConfig, paths: &[&str]) -> Option<ClickMethod> {
+    let raw = pick_string(cfg, paths)?;
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "button-areas" | "button_areas" | "areas" => Some(ClickMethod::ButtonAreas),
+        "clickfinger" | "click-finger" | "click_finger" => Some(ClickMethod::Clickfinger),
+        _ => None,
+    }
+}
+
+pub(crate) fn opt_tap_button_map(cfg: &RuneConfig, paths: &[&str]) -> Option<TapButtonMap> {
+    let raw = pick_string(cfg, paths)?;
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "left-right-middle" | "left_right_middle" | "lrm" => Some(TapButtonMap::LeftRightMiddle),
+        "left-middle-right" | "left_middle_right" | "lmr" => Some(TapButtonMap::LeftMiddleRight),
+        _ => None,
+    }
+}
+
+pub(crate) fn pick_node_border_color_mode(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: NodeBorderColorMode,
+) -> NodeBorderColorMode {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"') {
+        "use-window-active" => NodeBorderColorMode::UseWindowActive,
+        "use-window-inactive" => NodeBorderColorMode::UseWindowInactive,
+        "use-window-secondary-active" => NodeBorderColorMode::UseWindowSecondaryActive,
+        "use-window-secondary-inactive" => NodeBorderColorMode::UseWindowSecondaryInactive,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_overlay_border_source(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: OverlayBorderSource,
+) -> OverlayBorderSource {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"') {
+        "primary" => OverlayBorderSource::Primary,
+        "secondary" => OverlayBorderSource::Secondary,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_node_display_policy(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: NodeDisplayPolicy,
+) -> NodeDisplayPolicy {
+    for path in paths {
+        if let Ok(Some(v)) = cfg.get_optional::<bool>(path) {
+            return if v {
+                NodeDisplayPolicy::Always
+            } else {
+                NodeDisplayPolicy::Off
+            };
+        }
+    }
+
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "off" | "false" => NodeDisplayPolicy::Off,
+        "hover" => NodeDisplayPolicy::Hover,
+        "always" | "on" | "true" => NodeDisplayPolicy::Always,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_node_background_color_mode(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: NodeBackgroundColorMode,
+) -> NodeBackgroundColorMode {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    let value = raw.trim().trim_matches('"');
+    if value.is_empty() {
+        return default;
+    }
+
+    match value.to_ascii_lowercase().as_str() {
+        "auto" => NodeBackgroundColorMode::Auto,
+        "theme" => NodeBackgroundColorMode::Theme,
+        "light" => NodeBackgroundColorMode::Light,
+        "dark" => NodeBackgroundColorMode::Dark,
+        _ => parse_hex_rgb(value)
+            .map(|(r, g, b)| NodeBackgroundColorMode::Fixed { r, g, b })
+            .unwrap_or(default),
+    }
+}
+
+pub(crate) fn pick_shape_style(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: ShapeStyle,
+) -> ShapeStyle {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "square" => ShapeStyle::Square,
+        "squircle" => ShapeStyle::Squircle,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_overlay_color_mode(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: OverlayColorMode,
+) -> OverlayColorMode {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    let value = raw.trim().trim_matches('"');
+    if value.is_empty() {
+        return default;
+    }
+
+    match value.to_ascii_lowercase().as_str() {
+        "auto" => OverlayColorMode::Auto,
+        "light" => OverlayColorMode::Light,
+        "dark" => OverlayColorMode::Dark,
+        _ => parse_hex_rgba(value)
+            .map(|(r, g, b, a)| OverlayColorMode::Fixed { r, g, b, a })
+            .unwrap_or(default),
+    }
+}
+
+pub(crate) fn pick_overlay_shape(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: OverlayShape,
+) -> OverlayShape {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "square" => OverlayShape::Square,
+        "rounded" => OverlayShape::Rounded,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_client_blur_mode(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: ClientBlurMode,
+) -> ClientBlurMode {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "off" => ClientBlurMode::Off,
+        "auto" => ClientBlurMode::Auto,
+        "always" => ClientBlurMode::Always,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_blur_method(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: BlurMethod,
+) -> BlurMethod {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "dual-kawase" | "dual_kawase" | "kawase" => BlurMethod::DualKawase,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_pin_badge_corner(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: PinBadgeCorner,
+) -> PinBadgeCorner {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "top-left" | "top_left" | "left" => PinBadgeCorner::TopLeft,
+        "top-right" | "top_right" | "right" => PinBadgeCorner::TopRight,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_window_close_animation_style(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: WindowCloseAnimationStyle,
+) -> WindowCloseAnimationStyle {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "shrink" => WindowCloseAnimationStyle::Shrink,
+        "fade" => WindowCloseAnimationStyle::Fade,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_raise_animation_trigger(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: RaiseAnimationTrigger,
+) -> RaiseAnimationTrigger {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    match raw.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+        "always" => RaiseAnimationTrigger::Always,
+        "overlap" | "overlapping" => RaiseAnimationTrigger::Overlap,
+        _ => default,
+    }
+}
+
+pub(crate) fn pick_decoration_border_color(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: DecorationBorderColor,
+) -> DecorationBorderColor {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    parse_hex_rgb(raw.trim().trim_matches('"'))
+        .map(|(r, g, b)| DecorationBorderColor { r, g, b })
+        .unwrap_or(default)
+}
+
+pub(crate) fn pick_shadow_color(
+    cfg: &RuneConfig,
+    paths: &[&str],
+    default: ShadowColor,
+) -> ShadowColor {
+    let Some(raw) = pick_string(cfg, paths) else {
+        return default;
+    };
+    parse_hex_rgba(raw.trim().trim_matches('"'))
+        .map(|(r, g, b, a)| ShadowColor { r, g, b, a })
+        .unwrap_or(default)
+}
+
+pub(crate) fn parse_hex_rgb(value: &str) -> Option<(f32, f32, f32)> {
+    let hex = value.strip_prefix('#').unwrap_or(value);
+    let expanded = match hex.len() {
+        3 => {
+            let mut out = String::with_capacity(6);
+            for ch in hex.chars() {
+                out.push(ch);
+                out.push(ch);
+            }
+            out
+        }
+        6 => hex.to_string(),
+        _ => return None,
+    };
+
+    let r = u8::from_str_radix(&expanded[0..2], 16).ok()? as f32 / 255.0;
+    let g = u8::from_str_radix(&expanded[2..4], 16).ok()? as f32 / 255.0;
+    let b = u8::from_str_radix(&expanded[4..6], 16).ok()? as f32 / 255.0;
+    Some((r, g, b))
+}
+
+pub(crate) fn parse_hex_rgba(value: &str) -> Option<(f32, f32, f32, f32)> {
+    let hex = value.strip_prefix('#').unwrap_or(value);
+    let expanded = match hex.len() {
+        3 => {
+            let mut out = String::with_capacity(8);
+            for ch in hex.chars() {
+                out.push(ch);
+                out.push(ch);
+            }
+            out.push_str("ff");
+            out
+        }
+        4 => {
+            let mut out = String::with_capacity(8);
+            for ch in hex.chars() {
+                out.push(ch);
+                out.push(ch);
+            }
+            out
+        }
+        6 => format!("{hex}ff"),
+        8 => hex.to_string(),
+        _ => return None,
+    };
+
+    let r = u8::from_str_radix(&expanded[0..2], 16).ok()? as f32 / 255.0;
+    let g = u8::from_str_radix(&expanded[2..4], 16).ok()? as f32 / 255.0;
+    let b = u8::from_str_radix(&expanded[4..6], 16).ok()? as f32 / 255.0;
+    let a = u8::from_str_radix(&expanded[6..8], 16).ok()? as f32 / 255.0;
+    Some((r, g, b, a))
+}

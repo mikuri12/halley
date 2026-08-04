@@ -1,0 +1,153 @@
+# Visual styling can live in its own gathered file.
+
+font:
+  family "monospace"
+  size 11
+end
+
+screenshot:
+  directory "$env.HOME/Pictures/Screenshots/"
+  highlight-colour "#d65d26"
+  background-colour "auto"
+end
+
+background:
+  mode "field-shader"
+  shader "space"
+  path ""
+  fit "cover"
+  colour "#181a26"
+  accent-colour "#8fa8d8"
+  intensity 1.0
+  animated true
+end
+
+decorations:
+  border:
+    size 3
+    radius 0
+    colour-focused "#d65d26"
+    colour-unfocused "#3c3836"
+  end
+
+  secondary-border:
+    enabled true
+    gap 2
+    size 1
+    colour-focused "#fabd2f"
+    colour-unfocused "#504945"
+  end
+
+  resize-using-border true
+end
+
+# Renderer-level visual effects: backdrop blur and shadows.
+effects:
+  blur:
+    enabled false
+    overlays true
+    windows "auto"
+    layer-shell "off"
+    method "dual-kawase"
+    radius 24
+    passes 3
+    saturation 1.10
+    noise 0.012
+  end
+
+  shadows:
+    window:
+      enabled true
+      blur-radius 8
+      spread 0
+      offset-x 0
+      offset-y 5
+      colour "#05030530"
+    end
+
+    node:
+      enabled true
+      blur-radius 14
+      spread 0
+      offset-x 0
+      offset-y 3
+      colour "#05030524"
+    end
+
+    overlay:
+      enabled true
+      blur-radius 24
+      spread 1
+      offset-x 0
+      offset-y 7
+      colour "#05030538"
+    end
+  end
+end
+
+node:
+  show-labels "hover"
+  show-app-icons "always"
+  node-shape "square"
+  node-label-shape "square"
+  icon-size 0.72
+  opacity 1.0
+  background-colour "auto"
+end
+
+overlays:
+  background-colour "auto"
+  text-colour "auto"
+  shape "square"
+  borders true
+  border-source "primary"
+  blur true
+end
+
+animations:
+  enabled true
+
+  maximize:
+    enabled true
+    duration-ms 240
+  end
+
+  fullscreen:
+    enabled true
+    duration-ms 240
+  end
+
+  window-open:
+    enabled true
+    duration-ms 620
+  end
+
+  window-close:
+    enabled true
+    duration-ms 270
+    style "shrink"
+  end
+
+  cluster:
+    # Opening/closing a cluster workspace. open slides members in; close sucks
+    # them into the core node. Split per layout (tiling / stacking).
+    enabled true
+    tiling:
+      open-duration-ms 300
+      stagger-ms 55
+      close-duration-ms 420
+    end
+    stacking:
+      open-duration-ms 240
+      close-duration-ms 360
+    end
+  end
+
+  raise:
+    enabled true
+    duration-ms 140
+    scale 1.025
+    shadow-boost 0.18
+    trigger "always"
+  end
+end

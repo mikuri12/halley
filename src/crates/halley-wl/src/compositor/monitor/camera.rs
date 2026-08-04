@@ -1,0 +1,602 @@
+use super::*;
+
+#[inline]
+fn zoom_step(st: &Halley) -> f32 {
+    st.runtime.tuning.zoom_step.max(1.001)
+}
+
+#[inline]
+fn zoom_scale_bounds(st: &Halley) -> (f32, f32) {
+    let min = st.runtime.tuning.zoom_min.clamp(0.05, 1.0);
+    let max = st.runtime.tuning.zoom_max.max(min).clamp(1.0, 16.0);
+    (min, max)
+}
+
+#[inline]
+fn zoom_smooth_rate(st: &Halley) -> f32 {
+    st.runtime.tuning.zoom_smooth_rate.clamp(0.1, 120.0)
+}
+
+#[inline]
+pub(crate) fn camera_view_size(st: &Halley) -> Vec2 {
+    st.model.zoom_ref_size
+}
+
+#[inline]
+pub(crate) fn pan_camera_target(st: &mut Halley, delta: Vec2) {
+    st.model.camera_target_center = Vec2 {
+        x: st.model.camera_target_center.x + delta.x,
+        y: st.model.camera_target_center.y + delta.y,
+    };
+    st.request_maintenance();
+}
+
+#[inline]
+pub(crate) fn set_camera_target_view_size(st: &mut Halley, size: Vec2) {
+    st.model.camera_target_view_size = clamp_camera_view_size(st, size);
+    st.request_maintenance();
+}
+
+#[inline]
+pub(crate) fn snap_camera_targets_to_live(st: &mut Halley) {
+    st.model.camera_target_center = st.model.viewport.center;
+    st.model.camera_target_view_size = st.model.zoom_ref_size;
+}
+
+#[inline]
+pub(crate) fn clamp_camera_view_size(st: &Halley, size: Vec2) -> Vec2 {
+    let base = st.model.viewport.size;
+    let (min_zoom, max_zoom) = zoom_scale_bounds(st);
+    Vec2 {
+        x: size.x.clamp(base.x / max_zoom, base.x / min_zoom),
+        y: size.y.clamp(base.y / max_zoom, base.y / min_zoom),
+    }
+}
+
+#[inline]
+fn fullscreen_lock_active_on_monitor(st: &Halley, monitor: &str) -> bool {
+    st.model
+        .fullscreen_state
+        .fullscreen_active_node
+        .contains_key(monitor)
+        && !crate::compositor::focus::cycle::focus_cycle_releases_fullscreen_lock_for_monitor(
+            st, monitor,
+        )
+}
+
+#[inline]
+pub(crate) fn pan_blocked_on_monitor(st: &Halley, monitor: &str) -> bool {
+    fullscreen_lock_active_on_monitor(st, monitor)
+        || crate::compositor::workspace::state::maximize_session_active_on_monitor(st, monitor)
+        || st.active_cluster_workspace_for_monitor(monitor).is_some()
+        || st.cluster_mode_active_for_monitor(monitor)
+}
+
+#[inline]
+pub(crate) fn zoom_blocked_by_interaction(st: &Halley) -> bool {
+    st.has_active_cluster_workspace()
+        || fullscreen_lock_active_on_monitor(st, st.model.monitor_state.current_monitor.as_str())
+        || crate::compositor::workspace::state::maximize_session_active_on_monitor(
+            st,
+            st.model.monitor_state.current_monitor.as_str(),
+        )
+        || st.cluster_mode_active()
+        || st.input.interaction_state.grabbed_edge_pan_active
+        || st
+            .input
+            .interaction_state
+            .grabbed_edge_pan_monitor
+            .is_some()
+        || st.input.interaction_state.grabbed_edge_pan_pressure.x > 0.01
+        || st.input.interaction_state.grabbed_edge_pan_pressure.y > 0.01
+}
+
+pub(crate) fn update_zoom_live_surface_sizes(st: &mut Halley) {
+    st.ui.render_state.cache.zoom_resize_fallback.clear();
+    st.ui.render_state.cache.zoom_resize_reject_streak.clear();
+    st.ui.render_state.cache.zoom_resize_static_streak.clear();
+    st.ui.render_state.cache.zoom_last_observed_size.clear();
+}
+
+/// Inertial-zoom tuning. Zoom velocity lives in log(view-size) units per second.
+/// `STACK_MAX` caps how much quick repeated zooming can pile up (the accel
+/// ceiling); `VEL_EPS` is the speed below which the glide snaps to rest.
+const ZOOM_VEL_STACK_MAX: f32 = 6.0;
+const ZOOM_VEL_EPS: f32 = 0.02;
+
+/// Inertial-pan tuning. Pan velocity lives in world units per second.
+/// `PAN_VEL_EPS` is the speed below which a coasting flick snaps to rest;
+/// `PAN_VEL_MAX` caps how fast a flick can launch the viewport.
+const PAN_VEL_EPS: f32 = 4.0;
+const PAN_VEL_MAX: f32 = 12000.0;
+
+#[inline]
+fn pan_decay_rate(st: &Halley) -> f32 {
+    st.runtime
+        .tuning
+        .input
+        .gestures
+        .pan_decay_rate
+        .clamp(0.5, 30.0)
+}
+
+/// Seed inertial pan with a release velocity (world units/sec), clamped to a max
+/// launch speed. A subsequent `tick_camera_smoothing` coasts the camera target
+/// and decays the velocity with friction.
+pub(crate) fn fling_pan(st: &mut Halley, vel: Vec2) {
+    let speed = vel.x.hypot(vel.y);
+    st.model.pan_vel = if speed > PAN_VEL_MAX {
+        Vec2 {
+            x: vel.x / speed * PAN_VEL_MAX,
+            y: vel.y / speed * PAN_VEL_MAX,
+        }
+    } else {
+        vel
+    };
+    st.request_maintenance();
+}
+
+pub(crate) fn zoom_by_steps(st: &mut Halley, steps: f32) {
+    if !st.runtime.tuning.zoom_enabled {
+        return;
+    }
+    if zoom_blocked_by_interaction(st) {
+        return;
+    }
+    let steps = steps.clamp(-4.0, 4.0);
+    if steps.abs() < f32::EPSILON {
+        return;
+    }
+
+    if !st.runtime.tuning.zoom_smooth {
+        // Instant zoom: jump the target, no inertia.
+        let factor = zoom_step(st).powf(steps);
+        set_camera_target_view_size(
+            st,
+            Vec2 {
+                x: st.model.camera_target_view_size.x / factor,
+                y: st.model.camera_target_view_size.y / factor,
+            },
+        );
+        return;
+    }
+
+    // Inertial/lens zoom: inject velocity in log space. Repeating in the same
+    // direction stacks velocity (an accelerating ramp); the opposite direction
+    // bleeds it off or reverses. One isolated press travels ~one `zoom_step`
+    // (impulse / friction == ln(step)) and then coasts to a stop.
+    let friction = zoom_smooth_rate(st);
+    let step_impulse = friction * zoom_step(st).ln();
+    let cap = step_impulse * ZOOM_VEL_STACK_MAX;
+    // zoom-in (+steps) shrinks the view -> negative log velocity.
+    st.model.zoom_log_vel = (st.model.zoom_log_vel - steps * step_impulse).clamp(-cap, cap);
+    st.request_maintenance();
+}
+
+pub(crate) fn reset_zoom(st: &mut Halley) {
+    if !st.runtime.tuning.zoom_enabled {
+        return;
+    }
+    if zoom_blocked_by_interaction(st) {
+        return;
+    }
+    st.model.zoom_log_vel = 0.0;
+    set_camera_target_view_size(st, st.model.viewport.size);
+}
+
+pub(crate) fn tick_camera_smoothing(st: &mut Halley, now: Instant) {
+    let _ = tick_camera_smoothing_inner(st, now, false);
+}
+
+/// Advance a non-active monitor's camera toward its targets without the
+/// live-interaction guards (the pan-anim snap and the edge-pan notify, which
+/// only apply to the monitor being interacted with). Returns whether anything
+/// moved, so the caller can keep that monitor repainting until it settles —
+/// otherwise a monitor mid-zoom freezes when the pointer leaves it.
+pub(crate) fn tick_camera_smoothing_passive(st: &mut Halley, now: Instant) -> bool {
+    tick_camera_smoothing_inner(st, now, true)
+}
+
+fn tick_camera_smoothing_inner(st: &mut Halley, now: Instant, passive: bool) -> bool {
+    if !passive && st.input.interaction_state.viewport_pan_anim.is_some() {
+        st.model.zoom_log_vel = 0.0;
+        st.model.pan_vel = Vec2 { x: 0.0, y: 0.0 };
+        snap_camera_targets_to_live(st);
+        return false;
+    }
+
+    if !st.runtime.tuning.physics_enabled {
+        let changed = st.model.viewport.center != st.model.camera_target_center
+            || st.model.zoom_ref_size != st.model.camera_target_view_size;
+        st.model.viewport.center = st.model.camera_target_center;
+        st.model.zoom_ref_size = st.model.camera_target_view_size;
+        st.model.zoom_log_vel = 0.0;
+        st.model.pan_vel = Vec2 { x: 0.0, y: 0.0 };
+        if !passive {
+            st.runtime.tuning.viewport_center = st.model.viewport.center;
+            st.runtime.tuning.viewport_size = st.model.zoom_ref_size;
+        }
+        return changed;
+    }
+
+    let dt = now
+        .saturating_duration_since(st.ui.render_state.render_last_tick())
+        .as_secs_f32()
+        .clamp(1.0 / 240.0, 1.0 / 20.0);
+    if !st.runtime.tuning.zoom_enabled {
+        st.model.camera_target_view_size = st.model.viewport.size;
+        st.model.zoom_log_vel = 0.0;
+    }
+
+    let smooth_rate = zoom_smooth_rate(st);
+    let center_alpha = if st.runtime.tuning.zoom_smooth {
+        (dt * smooth_rate).clamp(0.08, 0.60)
+    } else {
+        1.0
+    };
+    let zoom_alpha = if st.runtime.tuning.zoom_smooth {
+        (dt * smooth_rate).clamp(0.08, 0.60)
+    } else {
+        1.0
+    };
+
+    let mut changed = false;
+
+    // Inertial pan: coast the target center by velocity with friction so a flick
+    // glides to a smooth stop, mirroring the inertial-zoom integration below. The
+    // center-ease that follows then carries the live viewport toward the target.
+    if st.runtime.tuning.physics_enabled
+        && (st.model.pan_vel.x.abs() > PAN_VEL_EPS || st.model.pan_vel.y.abs() > PAN_VEL_EPS)
+    {
+        let friction = pan_decay_rate(st);
+        st.model.camera_target_center.x += st.model.pan_vel.x * dt;
+        st.model.camera_target_center.y += st.model.pan_vel.y * dt;
+        let decay = (-friction * dt).exp();
+        st.model.pan_vel.x *= decay;
+        st.model.pan_vel.y *= decay;
+        if st.model.pan_vel.x.hypot(st.model.pan_vel.y) <= PAN_VEL_EPS {
+            st.model.pan_vel = Vec2 { x: 0.0, y: 0.0 };
+        }
+        changed = true;
+    } else {
+        st.model.pan_vel = Vec2 { x: 0.0, y: 0.0 };
+    }
+
+    let next_center = Vec2 {
+        x: st.model.viewport.center.x
+            + (st.model.camera_target_center.x - st.model.viewport.center.x) * center_alpha,
+        y: st.model.viewport.center.y
+            + (st.model.camera_target_center.y - st.model.viewport.center.y) * center_alpha,
+    };
+    if (st.model.camera_target_center.x - next_center.x).abs() < 0.15 {
+        st.model.viewport.center.x = st.model.camera_target_center.x;
+    } else {
+        st.model.viewport.center.x = next_center.x;
+        changed = true;
+    }
+    if (st.model.camera_target_center.y - next_center.y).abs() < 0.15 {
+        st.model.viewport.center.y = st.model.camera_target_center.y;
+    } else {
+        st.model.viewport.center.y = next_center.y;
+        changed = true;
+    }
+
+    if st.runtime.tuning.zoom_smooth && st.model.zoom_log_vel.abs() > ZOOM_VEL_EPS {
+        // Inertial zoom: integrate log-space velocity with friction so a sweep
+        // accelerates as input stacks and then coasts to a smooth stop, like a
+        // powered lens. Working in log space keeps the perceptual zoom rate even.
+        let friction = smooth_rate;
+        let factor = (st.model.zoom_log_vel * dt).exp();
+        let raw = Vec2 {
+            x: st.model.zoom_ref_size.x * factor,
+            y: st.model.zoom_ref_size.y * factor,
+        };
+        let clamped = clamp_camera_view_size(st, raw);
+        let hit_bound = clamped.x != raw.x || clamped.y != raw.y;
+        st.model.zoom_ref_size = clamped;
+        st.model.zoom_log_vel *= (-friction * dt).exp();
+        if hit_bound || st.model.zoom_log_vel.abs() <= ZOOM_VEL_EPS {
+            st.model.zoom_log_vel = 0.0;
+        }
+        // Pin the target to where we coasted so the ease path below and the
+        // per-monitor save/restore stay consistent.
+        st.model.camera_target_view_size = clamped;
+        changed = true;
+    } else {
+        st.model.zoom_log_vel = 0.0;
+        let next_size = Vec2 {
+            x: st.model.zoom_ref_size.x
+                + (st.model.camera_target_view_size.x - st.model.zoom_ref_size.x) * zoom_alpha,
+            y: st.model.zoom_ref_size.y
+                + (st.model.camera_target_view_size.y - st.model.zoom_ref_size.y) * zoom_alpha,
+        };
+        if (st.model.camera_target_view_size.x - next_size.x).abs() < 0.2 {
+            st.model.zoom_ref_size.x = st.model.camera_target_view_size.x;
+        } else {
+            st.model.zoom_ref_size.x = next_size.x;
+            changed = true;
+        }
+        if (st.model.camera_target_view_size.y - next_size.y).abs() < 0.2 {
+            st.model.zoom_ref_size.y = st.model.camera_target_view_size.y;
+        } else {
+            st.model.zoom_ref_size.y = next_size.y;
+            changed = true;
+        }
+    }
+
+    if !passive {
+        st.runtime.tuning.viewport_center = st.model.viewport.center;
+        st.runtime.tuning.viewport_size = st.model.zoom_ref_size;
+    }
+    if changed {
+        if !passive && st.input.interaction_state.grabbed_edge_pan_active {
+            st.note_pan_viewport_change(now);
+        }
+        st.request_maintenance();
+    }
+    changed
+}
+
+pub fn active_zoom_lock_scale(_st: &Halley) -> f32 {
+    1.0
+}
+
+/// Ratio of screen pixels to world-view units for the current zoom level.
+///
+/// - At 1× zoom (zoom_ref_size == viewport.size) -> returns 1.0.
+/// - Zoomed in (zoom_ref_size shrunk) -> returns > 1.0; windows appear larger.
+/// - Zoomed out (zoom_ref_size grown)  -> returns < 1.0; windows appear smaller.
+///
+/// Multiplying all per-window screen-pixel dimensions by this value produces
+/// optical zoom: positions, sizes, and gaps all scale by the same factor.
+pub fn camera_render_scale(st: &Halley) -> f32 {
+    let vp_w = st.model.viewport.size.x.max(1.0);
+    let view_w = camera_view_size(st).x.max(1.0);
+    (vp_w / view_w).max(0.01)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    #[test]
+    fn fullscreen_on_current_monitor_blocks_zoom_changes() {
+        let dh = smithay::reexports::wayland_server::Display::<Halley>::new()
+            .expect("display")
+            .handle();
+        let mut state = Halley::new_for_test(&dh, halley_config::RuntimeTuning::default());
+
+        let fullscreen = state.model.field.spawn_surface(
+            "fullscreen",
+            Vec2 { x: 0.0, y: 0.0 },
+            Vec2 { x: 200.0, y: 140.0 },
+        );
+        state.assign_node_to_current_monitor(fullscreen);
+        let current_monitor = state.model.monitor_state.current_monitor.clone();
+        state
+            .model
+            .fullscreen_state
+            .fullscreen_active_node
+            .insert(current_monitor, fullscreen);
+
+        let base = state.model.viewport.size;
+        let zoomed_out = Vec2 {
+            x: base.x * 1.5,
+            y: base.y * 1.5,
+        };
+        state.model.camera_target_view_size = zoomed_out;
+        reset_zoom(&mut state);
+        assert_eq!(state.model.camera_target_view_size, zoomed_out);
+
+        state.model.camera_target_view_size = base;
+        zoom_by_steps(&mut state, -1.0);
+        assert_eq!(state.model.camera_target_view_size, base);
+    }
+
+    #[test]
+    fn maximize_session_on_current_monitor_blocks_pan_and_zoom() {
+        let dh = smithay::reexports::wayland_server::Display::<Halley>::new()
+            .expect("display")
+            .handle();
+        let mut state = Halley::new_for_test(&dh, halley_config::RuntimeTuning::default());
+
+        let maximized = state.model.field.spawn_surface(
+            "maximized",
+            Vec2 { x: 0.0, y: 0.0 },
+            Vec2 { x: 200.0, y: 140.0 },
+        );
+        state.assign_node_to_current_monitor(maximized);
+        let current_monitor = state.model.monitor_state.current_monitor.clone();
+        state.model.workspace_state.maximize_sessions.insert(
+            current_monitor.clone(),
+            crate::compositor::workspace::state::MaximizeSession {
+                target_id: maximized,
+                node_snapshots: HashMap::from([(
+                    maximized,
+                    crate::compositor::workspace::state::MaximizeNodeSnapshot {
+                        pos: Vec2 { x: 0.0, y: 0.0 },
+                        size: Vec2 { x: 200.0, y: 140.0 },
+                        pinned: false,
+                    },
+                )]),
+                camera: crate::compositor::workspace::state::MaximizeCameraSnapshot {
+                    center: state.model.viewport.center,
+                    view_size: state.model.zoom_ref_size,
+                },
+                state: crate::compositor::workspace::state::MaximizeSessionState::Active,
+            },
+        );
+
+        assert!(pan_blocked_on_monitor(&state, current_monitor.as_str()));
+
+        let before = state.model.camera_target_view_size;
+        zoom_by_steps(&mut state, -1.0);
+        assert_eq!(state.model.camera_target_view_size, before);
+    }
+
+    #[test]
+    fn cluster_states_block_pan() {
+        let dh = smithay::reexports::wayland_server::Display::<Halley>::new()
+            .expect("display")
+            .handle();
+        let mut state = Halley::new_for_test(&dh, halley_config::RuntimeTuning::default());
+        let monitor = state.model.monitor_state.current_monitor.clone();
+
+        assert!(!pan_blocked_on_monitor(&state, monitor.as_str()));
+        assert!(state.enter_cluster_mode());
+        assert!(pan_blocked_on_monitor(&state, monitor.as_str()));
+        assert!(state.exit_cluster_mode());
+
+        let a = state.model.field.spawn_surface(
+            "a",
+            Vec2 { x: 0.0, y: 0.0 },
+            Vec2 { x: 200.0, y: 140.0 },
+        );
+        let b = state.model.field.spawn_surface(
+            "b",
+            Vec2 { x: 260.0, y: 0.0 },
+            Vec2 { x: 200.0, y: 140.0 },
+        );
+        let cid = state
+            .model
+            .field
+            .create_cluster(vec![a, b])
+            .expect("cluster");
+        state
+            .model
+            .cluster_state
+            .active_cluster_workspaces
+            .insert(monitor.clone(), cid);
+
+        assert!(pan_blocked_on_monitor(&state, monitor.as_str()));
+    }
+
+    #[test]
+    fn fullscreen_on_other_monitor_does_not_block_zoom() {
+        let mut tuning = halley_config::RuntimeTuning::default();
+        tuning.tty_viewports = vec![
+            halley_config::ViewportOutputConfig {
+                connector: "left".to_string(),
+                enabled: true,
+                offset_x: 0,
+                offset_y: 0,
+                width: 800,
+                height: 600,
+                refresh_rate: None,
+                transform_degrees: 0,
+                vrr: halley_config::ViewportVrrMode::Off,
+                focus_ring: None,
+            },
+            halley_config::ViewportOutputConfig {
+                connector: "right".to_string(),
+                enabled: true,
+                offset_x: 800,
+                offset_y: 0,
+                width: 800,
+                height: 600,
+                refresh_rate: None,
+                transform_degrees: 0,
+                vrr: halley_config::ViewportVrrMode::Off,
+                focus_ring: None,
+            },
+        ];
+        let dh = smithay::reexports::wayland_server::Display::<Halley>::new()
+            .expect("display")
+            .handle();
+        let mut state = Halley::new_for_test(&dh, tuning);
+
+        let fullscreen_left = state.model.field.spawn_surface(
+            "fullscreen-left",
+            Vec2 { x: 400.0, y: 300.0 },
+            Vec2 { x: 200.0, y: 140.0 },
+        );
+        state.assign_node_to_monitor(fullscreen_left, "left");
+        state
+            .model
+            .fullscreen_state
+            .fullscreen_active_node
+            .insert("left".to_string(), fullscreen_left);
+
+        state.set_interaction_monitor("right");
+        state.set_focused_monitor("right");
+        let _ = state.activate_monitor("right");
+
+        let before = state.model.camera_target_view_size;
+        zoom_by_steps(&mut state, -1.0);
+
+        assert_eq!(state.model.camera_target_view_size, before);
+        assert!(state.model.zoom_log_vel > 0.0);
+    }
+
+    #[test]
+    fn zoom_disabled_ignores_zoom_inputs() {
+        let dh = smithay::reexports::wayland_server::Display::<Halley>::new()
+            .expect("display")
+            .handle();
+        let mut tuning = halley_config::RuntimeTuning::default();
+        tuning.zoom_enabled = false;
+        let mut state = Halley::new_for_test(&dh, tuning);
+
+        let before = state.model.camera_target_view_size;
+        zoom_by_steps(&mut state, 1.0);
+        reset_zoom(&mut state);
+
+        assert_eq!(state.model.camera_target_view_size, before);
+    }
+
+    #[test]
+    fn camera_view_size_clamps_to_configured_zoom_limits() {
+        let dh = smithay::reexports::wayland_server::Display::<Halley>::new()
+            .expect("display")
+            .handle();
+        let mut tuning = halley_config::RuntimeTuning::default();
+        tuning.zoom_min = 0.5;
+        tuning.zoom_max = 1.5;
+        let mut state = Halley::new_for_test(&dh, tuning);
+        let base = state.model.viewport.size;
+
+        set_camera_target_view_size(
+            &mut state,
+            Vec2 {
+                x: base.x * 10.0,
+                y: base.y * 10.0,
+            },
+        );
+        assert_eq!(state.model.camera_target_view_size.x, base.x / 0.5);
+        assert_eq!(state.model.camera_target_view_size.y, base.y / 0.5);
+
+        set_camera_target_view_size(
+            &mut state,
+            Vec2 {
+                x: base.x * 0.1,
+                y: base.y * 0.1,
+            },
+        );
+        assert_eq!(state.model.camera_target_view_size.x, base.x / 1.5);
+        assert_eq!(state.model.camera_target_view_size.y, base.y / 1.5);
+    }
+
+    #[test]
+    fn edge_pan_uses_camera_smoothing_instead_of_snapping() {
+        let dh = smithay::reexports::wayland_server::Display::<Halley>::new()
+            .expect("display")
+            .handle();
+        let mut state = Halley::new_for_test(&dh, halley_config::RuntimeTuning::default());
+        let now = Instant::now();
+
+        state.input.interaction_state.grabbed_edge_pan_active = true;
+        state.model.viewport.center = Vec2 { x: 0.0, y: 0.0 };
+        state.model.camera_target_center = Vec2 { x: 120.0, y: 0.0 };
+        state
+            .ui
+            .render_state
+            .set_render_last_tick(now - Duration::from_millis(16));
+
+        tick_camera_smoothing(&mut state, now);
+
+        assert!(state.model.viewport.center.x > 0.0);
+        assert!(state.model.viewport.center.x < state.model.camera_target_center.x);
+    }
+}

@@ -1,0 +1,415 @@
+use std::time::Instant;
+
+use smithay::desktop::utils::bbox_from_surface_tree;
+use smithay::reexports::wayland_server::Resource;
+use smithay::wayland::compositor::with_states;
+use smithay::wayland::shell::xdg::SurfaceCachedState;
+
+use crate::animation::active_surface_render_scale;
+use crate::compositor::interaction::{ResizeCtx, ResizeHandle};
+use crate::compositor::root::Halley;
+use crate::compositor::surface::{
+    active_stacking_render_order_for_monitor, node_allows_interactive_resize,
+};
+use crate::frame_loop::anim_style_for;
+use crate::presentation::world_to_screen;
+use crate::window::active_window_frame_pad_px;
+
+use super::handles::{pick_resize_handle_from_screen, press_is_near_edge};
+
+/// Minimum screen-px band around a window edge that counts as a resize grab, so
+/// thin (or zero) borders are still grabbable like a normal stacking WM.
+pub(crate) const RESIZE_EDGE_GRAB_PX: f32 = 8.0;
+
+/// Screen-px band within which a press/hover counts as grabbing an edge.
+pub(crate) fn resize_edge_grab_px(tuning: &halley_config::RuntimeTuning, cam_scale: f32) -> f32 {
+    (active_window_frame_pad_px(tuning) as f32 * cam_scale).max(RESIZE_EDGE_GRAB_PX)
+}
+
+/// When `resize-using-border` is enabled, return the resize handle for a pointer
+/// hovering/pressing near an interactive-resizable window's edge, else `None`.
+pub(crate) fn edge_resize_handle_at(
+    st: &Halley,
+    w: i32,
+    h: i32,
+    node_id: halley_core::field::NodeId,
+    sx: f32,
+    sy: f32,
+) -> Option<ResizeHandle> {
+    if !st.runtime.tuning.decorations.resize_using_border {
+        return None;
+    }
+    if !node_allows_interactive_resize(st, node_id) {
+        return None;
+    }
+    let rect = active_node_screen_rect(st, w, h, node_id, Instant::now(), None)?;
+    let band = resize_edge_grab_px(&st.runtime.tuning, st.camera_render_scale());
+    press_is_near_edge(rect, (sx, sy), band)
+        .then(|| pick_resize_handle_from_screen(rect, (sx, sy), band))
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ActiveNodeSurfaceTransformScreen {
+    pub(crate) origin_x: f32,
+    pub(crate) origin_y: f32,
+    pub(crate) scale: f32,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ActiveResizeGeometryScreen {
+    pub(crate) frame_left: f32,
+    pub(crate) frame_top: f32,
+    pub(crate) frame_right: f32,
+    pub(crate) frame_bottom: f32,
+    pub(crate) surface_origin_x: f32,
+    pub(crate) surface_origin_y: f32,
+    pub(crate) live_geo_w: f32,
+    pub(crate) live_geo_h: f32,
+    pub(crate) h_weight_left: f32,
+    pub(crate) h_weight_right: f32,
+    pub(crate) v_weight_top: f32,
+    pub(crate) v_weight_bottom: f32,
+}
+
+impl ActiveResizeGeometryScreen {
+    pub(crate) fn live_frame_rect_px(self, scale: f32) -> (i32, i32, i32, i32) {
+        let preview_w = (self.frame_right - self.frame_left).max(1.0);
+        let preview_h = (self.frame_bottom - self.frame_top).max(1.0);
+        let live_w = if self.live_geo_w > 0.0 {
+            (self.live_geo_w * scale).round().max(1.0)
+        } else {
+            preview_w
+        };
+        let live_h = if self.live_geo_h > 0.0 {
+            (self.live_geo_h * scale).round().max(1.0)
+        } else {
+            preview_h
+        };
+
+        let (left, right) = if self.h_weight_left != 0.0 && self.h_weight_right == 0.0 {
+            (self.frame_right - live_w, self.frame_right)
+        } else if self.h_weight_right != 0.0 && self.h_weight_left == 0.0 {
+            (self.frame_left, self.frame_left + live_w)
+        } else {
+            let center = (self.frame_left + self.frame_right) * 0.5;
+            (center - live_w * 0.5, center + live_w * 0.5)
+        };
+        let (top, bottom) = if self.v_weight_top != 0.0 && self.v_weight_bottom == 0.0 {
+            (self.frame_bottom - live_h, self.frame_bottom)
+        } else if self.v_weight_bottom != 0.0 && self.v_weight_top == 0.0 {
+            (self.frame_top, self.frame_top + live_h)
+        } else {
+            let center = (self.frame_top + self.frame_bottom) * 0.5;
+            (center - live_h * 0.5, center + live_h * 0.5)
+        };
+
+        let left = left.round() as i32;
+        let top = top.round() as i32;
+        let right = right.round() as i32;
+        let bottom = bottom.round() as i32;
+        (left, top, (right - left).max(1), (bottom - top).max(1))
+    }
+}
+
+pub(crate) fn active_node_screen_rect(
+    st: &Halley,
+    w: i32,
+    h: i32,
+    node_id: halley_core::field::NodeId,
+    now: Instant,
+    resize_preview: Option<ResizeCtx>,
+) -> Option<(f32, f32, f32, f32)> {
+    if let Some(active_resize) = active_resize_geometry_screen(st, node_id, resize_preview) {
+        return Some((
+            active_resize.frame_left,
+            active_resize.frame_top,
+            active_resize.frame_right,
+            active_resize.frame_bottom,
+        ));
+    }
+
+    if let Some((center, size)) =
+        crate::compositor::fullscreen::system::fullscreen_visual_for_node_on_current_monitor(
+            st, node_id,
+        )
+    {
+        let (cx, cy) = world_to_screen(st, w, h, center.x, center.y);
+        let cam_scale = st.camera_render_scale();
+        let half_w = size.x * cam_scale * 0.5;
+        let half_h = size.y * cam_scale * 0.5;
+        return Some((
+            cx as f32 - half_w,
+            cy as f32 - half_h,
+            cx as f32 + half_w,
+            cy as f32 + half_h,
+        ));
+    }
+
+    if let Some((center, size)) =
+        crate::compositor::workspace::state::maximized_visual_for_node_on_current_monitor_at(
+            st, node_id, now,
+        )
+    {
+        let (cx, cy) = world_to_screen(st, w, h, center.x, center.y);
+        let cam_scale = st.camera_render_scale();
+        let half_w = size.x * cam_scale * 0.5;
+        let half_h = size.y * cam_scale * 0.5;
+        return Some((
+            cx as f32 - half_w,
+            cy as f32 - half_h,
+            cx as f32 + half_w,
+            cy as f32 + half_h,
+        ));
+    }
+
+    let xform = active_node_surface_transform_screen_details(st, w, h, node_id, now, None)?;
+    let local_geo = active_node_visual_local_rect(st, node_id).or_else(|| {
+        st.model.field.node(node_id).map(|n| {
+            (
+                0.0,
+                0.0,
+                n.intrinsic_size.x.max(1.0),
+                n.intrinsic_size.y.max(1.0),
+            )
+        })
+    })?;
+
+    let (gx, gy, gw, gh) = local_geo;
+    let rw = (gw * xform.scale).round().max(1.0);
+    let rh = (gh * xform.scale).round().max(1.0);
+    let mut rx = xform.origin_x + (gx * xform.scale).round();
+    let mut ry = xform.origin_y + (gy * xform.scale).round();
+    let mut rr = rx + rw;
+    let mut rb = ry + rh;
+
+    let stack_render_order = active_stacking_render_order_for_monitor(
+        st,
+        st.model.monitor_state.current_monitor.as_str(),
+    );
+    if stack_render_order.contains_key(&node_id) {
+        let frame_pad_px = active_window_frame_pad_px(&st.runtime.tuning) as f32 * xform.scale;
+        rx -= frame_pad_px;
+        ry -= frame_pad_px;
+        rr += frame_pad_px;
+        rb += frame_pad_px;
+    }
+
+    Some((rx, ry, rr, rb))
+}
+
+pub(crate) fn active_node_surface_transform_screen_details(
+    st: &Halley,
+    w: i32,
+    h: i32,
+    node_id: halley_core::field::NodeId,
+    now: Instant,
+    resize_preview: Option<ResizeCtx>,
+) -> Option<ActiveNodeSurfaceTransformScreen> {
+    let n = st.model.field.node(node_id)?;
+    if n.state != halley_core::field::NodeState::Active {
+        return None;
+    }
+
+    let anim = anim_style_for(st, node_id, n.state.clone(), now);
+    let transition_alpha =
+        crate::compositor::workspace::state::active_transition_alpha(st, node_id, now);
+    let cam_scale = st.camera_render_scale();
+
+    let fit_scale = if let Some(monitor) = st.fullscreen_monitor_for_node(node_id) {
+        let (target_w, target_h) = if monitor == st.model.monitor_state.current_monitor {
+            let ws = st.model.viewport.size;
+            (ws.x.round() as i32, ws.y.round() as i32)
+        } else {
+            st.fullscreen_target_size_for(monitor)
+        };
+        let sw = (target_w as f32) / n.intrinsic_size.x.max(1.0);
+        let sh = (target_h as f32) / n.intrinsic_size.y.max(1.0);
+        sw.min(sh).max(0.1)
+    } else {
+        1.0
+    };
+
+    let anim_scale = active_surface_render_scale(
+        anim.scale,
+        st.active_zoom_lock_scale(),
+        n.intrinsic_size.x,
+        n.intrinsic_size.y,
+        transition_alpha,
+    ) * crate::compositor::fullscreen::system::fullscreen_entry_scale(
+        st,
+        node_id,
+        st.now_ms(now),
+    ) * fit_scale
+        * cam_scale;
+
+    let (origin_x, origin_y, scale) = if let Some(active_resize) =
+        active_resize_geometry_screen(st, node_id, resize_preview)
+    {
+        (
+            active_resize.surface_origin_x,
+            active_resize.surface_origin_y,
+            1.0f32,
+        )
+    } else {
+        let p = n.pos;
+        let (cx, cy) = world_to_screen(st, w, h, p.x, p.y);
+
+        let bbox_lx = st
+            .ui
+            .render_state
+            .cache
+            .bbox_loc
+            .get(&node_id)
+            .copied()
+            .unwrap_or((0.0, 0.0))
+            .0;
+        let bbox_ly = st
+            .ui
+            .render_state
+            .cache
+            .bbox_loc
+            .get(&node_id)
+            .copied()
+            .unwrap_or((0.0, 0.0))
+            .1;
+        let bbox_w = n.intrinsic_size.x.max(1.0);
+        let bbox_h = n.intrinsic_size.y.max(1.0);
+        let local_bbox = (bbox_lx, bbox_ly, bbox_w, bbox_h);
+        let (gx, gy, gw, gh) = st
+            .ui
+            .render_state
+            .cache
+            .window_geometry
+            .get(&node_id)
+            .copied()
+            .map(|(x, y, w, h)| (x, y, w.max(1.0), h.max(1.0)))
+            .unwrap_or(local_bbox);
+
+        let (rx, ry, scale) = if let Some((center, visual_size)) =
+            crate::compositor::fullscreen::system::fullscreen_visual_for_node_on_current_monitor(
+                st, node_id,
+            ) {
+            let (cx, cy) = world_to_screen(st, w, h, center.x, center.y);
+            let scale_x = visual_size.x * cam_scale / gw.max(1.0);
+            let scale_y = visual_size.y * cam_scale / gh.max(1.0);
+            let visual_scale = scale_x.min(scale_y).max(0.001);
+            let rw = (gw * visual_scale).round() as i32;
+            let rh = (gh * visual_scale).round() as i32;
+            (cx - (rw / 2), cy - (rh / 2), visual_scale)
+        } else if let Some((center, visual_size)) =
+            crate::compositor::workspace::state::maximized_visual_for_node_on_current_monitor_at(
+                st, node_id, now,
+            )
+        {
+            let (cx, cy) = world_to_screen(st, w, h, center.x, center.y);
+            let scale_x = visual_size.x * cam_scale / gw.max(1.0);
+            let scale_y = visual_size.y * cam_scale / gh.max(1.0);
+            let visual_scale = scale_x.min(scale_y).max(0.001);
+            let rw = (gw * visual_scale).round() as i32;
+            let rh = (gh * visual_scale).round() as i32;
+            (cx - (rw / 2), cy - (rh / 2), visual_scale)
+        } else if st
+            .fullscreen_monitor_for_node(node_id)
+            .is_some_and(|monitor| monitor == st.model.monitor_state.current_monitor)
+        {
+            (0, 0, anim_scale)
+        } else {
+            let rw = (gw * anim_scale).round() as i32;
+            let rh = (gh * anim_scale).round() as i32;
+            (cx - (rw / 2), cy - (rh / 2), anim_scale)
+        };
+        let origin_x = (rx as f32) - (gx * scale).round();
+        let origin_y = (ry as f32) - (gy * scale).round();
+
+        (origin_x, origin_y, scale)
+    };
+
+    Some(ActiveNodeSurfaceTransformScreen {
+        origin_x,
+        origin_y,
+        scale: scale.max(0.001),
+    })
+}
+
+pub(crate) fn active_resize_geometry_screen(
+    st: &Halley,
+    node_id: halley_core::field::NodeId,
+    resize_preview: Option<ResizeCtx>,
+) -> Option<ActiveResizeGeometryScreen> {
+    let rz = resize_preview.filter(|rz| rz.node_id == node_id)?;
+    if rz.handle == crate::compositor::interaction::ResizeHandle::Pending {
+        return None;
+    }
+    let frame_left = rz.preview_left_px;
+    let frame_top = rz.preview_top_px;
+    let frame_right = rz.preview_right_px;
+    let frame_bottom = rz.preview_bottom_px;
+    let (_, _, live_geo_w, live_geo_h) = st
+        .ui
+        .render_state
+        .cache
+        .window_geometry
+        .get(&node_id)
+        .copied()
+        .unwrap_or((0.0, 0.0, 0.0, 0.0));
+    let geo_lx = rz.start_geo_lx;
+    let geo_ly = rz.start_geo_ly;
+
+    Some(ActiveResizeGeometryScreen {
+        frame_left,
+        frame_top,
+        frame_right,
+        frame_bottom,
+        surface_origin_x: frame_left - geo_lx.round(),
+        surface_origin_y: frame_top - geo_ly.round(),
+        live_geo_w,
+        live_geo_h,
+        h_weight_left: rz.h_weight_left,
+        h_weight_right: rz.h_weight_right,
+        v_weight_top: rz.v_weight_top,
+        v_weight_bottom: rz.v_weight_bottom,
+    })
+}
+
+fn active_node_visual_local_rect(
+    st: &Halley,
+    node_id: halley_core::field::NodeId,
+) -> Option<(f32, f32, f32, f32)> {
+    if let Some(&(x, y, w, h)) = st.ui.render_state.cache.window_geometry.get(&node_id) {
+        return Some((x, y, w.max(1.0), h.max(1.0)));
+    }
+
+    for top in st.platform.xdg_shell_state.toplevel_surfaces() {
+        let wl = top.wl_surface();
+        let key = wl.id();
+        if st.model.surface_to_node.get(&key).copied() != Some(node_id) {
+            continue;
+        }
+
+        let geo = with_states(wl, |states| {
+            states
+                .cached_state
+                .get::<SurfaceCachedState>()
+                .current()
+                .geometry
+        });
+        if let Some(g) = geo {
+            return Some((
+                g.loc.x as f32,
+                g.loc.y as f32,
+                g.size.w.max(1) as f32,
+                g.size.h.max(1) as f32,
+            ));
+        }
+
+        let bbox = bbox_from_surface_tree(wl, (0, 0));
+        return Some((
+            bbox.loc.x as f32,
+            bbox.loc.y as f32,
+            bbox.size.w.max(1) as f32,
+            bbox.size.h.max(1) as f32,
+        ));
+    }
+
+    None
+}

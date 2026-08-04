@@ -1,0 +1,87 @@
+use std::collections::{HashMap, HashSet};
+
+use halley_core::cluster::ClusterId;
+use halley_core::cluster_policy::ClusterFormationState;
+use halley_core::field::{NodeId, Vec2};
+use halley_core::tiling::Rect;
+use halley_core::viewport::Viewport;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ClusterFinalizeAppLaunch {
+    pub(crate) app_id: String,
+    pub(crate) command: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ClusterFinalizeDraftState {
+    pub(crate) app_ids: Vec<String>,
+    pub(crate) app_launches: Vec<ClusterFinalizeAppLaunch>,
+    pub(crate) selected_node_ids: HashSet<NodeId>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PendingLiftClusterBuildState {
+    pub(crate) selected_node_ids: HashSet<NodeId>,
+    pub(crate) candidate_node_ids: HashSet<NodeId>,
+    pub(crate) staged_node_ids: HashSet<NodeId>,
+    pub(crate) app_launches: Vec<ClusterFinalizeAppLaunch>,
+    pub(crate) name_record: ClusterNameRecord,
+    pub(crate) expected_members: usize,
+    pub(crate) launched: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ClusterOverflowPromotionAnim {
+    pub(crate) member_id: NodeId,
+    pub(crate) started_at_ms: u64,
+    pub(crate) reveal_at_ms: u64,
+    pub(crate) source_strip_rect: Rect,
+    pub(crate) source_center: Vec2,
+    pub(crate) target_center: Vec2,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum ClusterNameRecord {
+    Generic { slot: u32 },
+    Custom { name: String },
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ClusterNamingPromptState {
+    pub(crate) generated_generic_name: String,
+    pub(crate) input: String,
+    pub(crate) caret_char: usize,
+    pub(crate) selection_anchor_char: usize,
+    pub(crate) selection_focus_char: usize,
+    pub(crate) scroll_char: usize,
+    pub(crate) confirm_hover_mix: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PendingClusterSlotTransition {
+    pub(crate) slot: u8,
+    pub(crate) cid: ClusterId,
+    pub(crate) core_id: NodeId,
+}
+
+pub(crate) struct ClusterState {
+    pub(crate) cluster_form_state: ClusterFormationState,
+    pub(crate) cluster_names: HashMap<ClusterId, ClusterNameRecord>,
+    pub(crate) cluster_name_prompt: HashMap<String, ClusterNamingPromptState>,
+    pub(crate) cluster_finalize_drafts: HashMap<String, ClusterFinalizeDraftState>,
+    pub(crate) pending_lift_cluster_builds: HashMap<String, PendingLiftClusterBuildState>,
+    pub(crate) active_cluster_workspaces: HashMap<String, ClusterId>,
+    pub(crate) cluster_bloom_open: HashMap<String, ClusterId>,
+    pub(crate) cluster_mode_selected_nodes: HashMap<String, HashSet<NodeId>>,
+    pub(crate) workspace_hidden_nodes: HashMap<String, Vec<NodeId>>,
+    pub(crate) workspace_prev_viewports: HashMap<String, Viewport>,
+    pub(crate) workspace_core_positions: HashMap<String, Vec2>,
+    pub(crate) cluster_overflow_members: HashMap<String, Vec<NodeId>>,
+    pub(crate) cluster_overflow_rects: HashMap<String, Rect>,
+    pub(crate) cluster_overflow_scroll_offsets: HashMap<String, usize>,
+    pub(crate) cluster_overflow_reveal_started_at_ms: HashMap<String, u64>,
+    pub(crate) cluster_overflow_visible_until_ms: HashMap<String, u64>,
+    pub(crate) cluster_overflow_promotion_anim: HashMap<String, ClusterOverflowPromotionAnim>,
+    pub(crate) cluster_slot_order: HashMap<String, Vec<ClusterId>>,
+    pub(crate) pending_cluster_slot_transition: HashMap<String, PendingClusterSlotTransition>,
+}

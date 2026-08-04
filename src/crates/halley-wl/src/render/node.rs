@@ -1,0 +1,1071 @@
+use std::collections::HashMap;
+use std::error::Error;
+use std::time::Instant;
+
+use smithay::{
+    backend::{
+        allocator::Fourcc,
+        renderer::{
+            Color32F, ImportMem, Texture,
+            gles::{GlesFrame, GlesRenderer, Uniform, UniformName, UniformType},
+        },
+    },
+    desktop::utils::bbox_from_surface_tree,
+    utils::{Buffer, Physical, Rectangle, Size, Transform},
+};
+
+use crate::compositor::root::Halley;
+use halley_config::{NodeBackgroundColorMode, NodeDisplayPolicy, PinBadgeCorner, ShapeStyle};
+
+use super::log_rounded_shader_failure;
+use crate::animation::ease_in_out_cubic;
+use crate::frame_loop::anim_style_for;
+use crate::presentation::{
+    node_marker_bounds, node_marker_metrics, themed_node_fill_color, themed_node_label_fill_color,
+    themed_node_label_text_color, themed_node_ring_color, world_to_screen,
+};
+use crate::render::pin_icon::{PinBadgeLayout, draw_pin_badge};
+use crate::render::shadow::draw_shadow_rect;
+use crate::render::state::{ClosingWindowAnimationKind, ClosingWindowAnimationSnapshot};
+use crate::render::surface_capture::render_surface_tree_to_texture;
+use crate::text::{draw_ui_text, ui_text_size};
+
+const NODE_SQUARE_SHADER: &str = include_str!("shaders/node_square_shader.frag");
+const NODE_SQUIRCLE_SHADER: &str = include_str!("shaders/node_squircle_shader.frag");
+const NODE_CIRCLE_SHADER: &str = include_str!("shaders/node_circle_shader.frag");
+const UI_RECT_ROUNDED_SHADER: &str = include_str!("shaders/ui_rect_rounded_shader.frag");
+const UI_RECT_SQUARE_SHADER: &str = include_str!("shaders/ui_rect_square_shader.frag");
+
+pub(crate) const NODE_ICON_FADE_DELAY_MS: u64 = 1000;
+pub(crate) const NODE_ICON_FADE_MS: u64 = 220;
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/// Snapshot of per-node data captured before any mutable frame calls so that
+/// node iteration and drawing stay in separate, borrow-clean passes.
+pub(crate) struct NodeSnapshot {
+    pub id: halley_core::field::NodeId,
+    pub state: halley_core::field::NodeState,
+    pub pos: halley_core::field::Vec2,
+    pub label: String,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct HoverPreviewCard {
+    pub(crate) node_id: halley_core::field::NodeId,
+    pub(crate) rect: Rectangle<i32, Physical>,
+    pub(crate) alpha: f32,
+}
+
+pub(crate) fn ensure_node_circle_resources(
+    renderer: &mut GlesRenderer,
+    st: &mut Halley,
+) -> Result<(), Box<dyn Error>> {
+    if st.ui.render_state.gpu.node_circle_texture.is_none() {
+        const TEX_SIZE: usize = 4;
+        let pixel = vec![255u8; TEX_SIZE * TEX_SIZE * 4];
+        st.ui.render_state.gpu.node_circle_texture = Some(renderer.import_memory(
+            &pixel,
+            Fourcc::Abgr8888,
+            (TEX_SIZE as i32, TEX_SIZE as i32).into(),
+            false,
+        )?);
+    }
+
+    if st.ui.render_state.gpu.node_squircle_program.is_none() {
+        st.ui.render_state.gpu.node_squircle_program =
+            Some(renderer.compile_custom_texture_shader(
+                NODE_SQUIRCLE_SHADER,
+                &[
+                    UniformName::new("node_color", UniformType::_4f),
+                    UniformName::new("fill_color", UniformType::_4f),
+                    UniformName::new("flat_fill", UniformType::_1f),
+                    UniformName::new("center_flat_fill", UniformType::_1f),
+                    UniformName::new("fill_alpha", UniformType::_1f),
+                ],
+            )?);
+    }
+
+    if st.ui.render_state.gpu.node_square_program.is_none() {
+        st.ui.render_state.gpu.node_square_program = Some(renderer.compile_custom_texture_shader(
+            NODE_SQUARE_SHADER,
+            &[
+                UniformName::new("node_color", UniformType::_4f),
+                UniformName::new("fill_color", UniformType::_4f),
+                UniformName::new("flat_fill", UniformType::_1f),
+                UniformName::new("center_flat_fill", UniformType::_1f),
+                UniformName::new("fill_alpha", UniformType::_1f),
+            ],
+        )?);
+    }
+
+    if st.ui.render_state.gpu.node_circle_program.is_none() {
+        st.ui.render_state.gpu.node_circle_program = Some(renderer.compile_custom_texture_shader(
+            NODE_CIRCLE_SHADER,
+            &[
+                UniformName::new("node_color", UniformType::_4f),
+                UniformName::new("fill_color", UniformType::_4f),
+                UniformName::new("flat_fill", UniformType::_1f),
+                UniformName::new("center_flat_fill", UniformType::_1f),
+                UniformName::new("fill_alpha", UniformType::_1f),
+            ],
+        )?);
+    }
+
+    if st.ui.render_state.gpu.ui_rect_rounded_program.is_none()
+        && !st.ui.render_state.gpu.ui_rect_rounded_program_failed
+    {
+        match renderer.compile_custom_texture_shader(
+            UI_RECT_ROUNDED_SHADER,
+            &[
+                UniformName::new("node_color", UniformType::_4f),
+                UniformName::new("fill_color", UniformType::_4f),
+                UniformName::new("rect_size", UniformType::_2f),
+                UniformName::new("inner_rect_size", UniformType::_2f),
+                UniformName::new("inner_rect_offset", UniformType::_2f),
+                UniformName::new("corner_radius", UniformType::_1f),
+                UniformName::new("inner_corner_radius", UniformType::_1f),
+                UniformName::new("border_px", UniformType::_1f),
+            ],
+        ) {
+            Ok(program) => st.ui.render_state.gpu.ui_rect_rounded_program = Some(program),
+            Err(err) => {
+                st.ui.render_state.gpu.ui_rect_rounded_program_failed = true;
+                log_rounded_shader_failure(
+                    "render/shaders/ui_rect_rounded_shader.frag",
+                    "border-mask",
+                    &err,
+                );
+            }
+        }
+    }
+
+    if st.ui.render_state.gpu.ui_rect_square_program.is_none()
+        && !st.ui.render_state.gpu.ui_rect_square_program_failed
+    {
+        match renderer.compile_custom_texture_shader(
+            UI_RECT_SQUARE_SHADER,
+            &[
+                UniformName::new("node_color", UniformType::_4f),
+                UniformName::new("fill_color", UniformType::_4f),
+                UniformName::new("rect_size", UniformType::_2f),
+                UniformName::new("inner_rect_size", UniformType::_2f),
+                UniformName::new("inner_rect_offset", UniformType::_2f),
+                UniformName::new("corner_radius", UniformType::_1f),
+                UniformName::new("inner_corner_radius", UniformType::_1f),
+                UniformName::new("border_px", UniformType::_1f),
+            ],
+        ) {
+            Ok(program) => st.ui.render_state.gpu.ui_rect_square_program = Some(program),
+            Err(err) => {
+                st.ui.render_state.gpu.ui_rect_square_program_failed = true;
+                log_rounded_shader_failure(
+                    "render/shaders/ui_rect_square_shader.frag",
+                    "border-mask",
+                    &err,
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub(crate) fn draw_shader_circle(
+    frame: &mut GlesFrame<'_, '_>,
+    st: &Halley,
+    cx: i32,
+    cy: i32,
+    radius: i32,
+    round_shape: NodeRoundShape,
+    alpha: f32,
+    fill_alpha: f32,
+    border_color: Color32F,
+    fill_color: Color32F,
+    flat_fill: bool,
+    center_flat_fill: bool,
+    damage: Rectangle<i32, Physical>,
+) -> Result<(), Box<dyn Error>> {
+    let Some(texture) = st.ui.render_state.gpu.node_circle_texture.as_ref() else {
+        return Ok(());
+    };
+    let program = match round_shape {
+        NodeRoundShape::Circle => st.ui.render_state.gpu.node_circle_program.as_ref(),
+        NodeRoundShape::Square => st.ui.render_state.gpu.node_square_program.as_ref(),
+        NodeRoundShape::Squircle => st.ui.render_state.gpu.node_squircle_program.as_ref(),
+    };
+    let Some(program) = program else {
+        return Ok(());
+    };
+
+    let radius = radius.max(1);
+    let diameter = (radius * 2).max(1);
+    let dest = Rectangle::<i32, Physical>::new(
+        (cx - radius, cy - radius).into(),
+        (diameter, diameter).into(),
+    );
+    let tex_size = texture.size();
+    let src = Rectangle::<f64, Buffer>::new(
+        (0.0, 0.0).into(),
+        (tex_size.w as f64, tex_size.h as f64).into(),
+    );
+    let uniforms = [
+        Uniform::new(
+            "node_color",
+            (
+                border_color.r(),
+                border_color.g(),
+                border_color.b(),
+                border_color.a(),
+            ),
+        ),
+        Uniform::new(
+            "fill_color",
+            (
+                fill_color.r(),
+                fill_color.g(),
+                fill_color.b(),
+                fill_color.a(),
+            ),
+        ),
+        Uniform::new("flat_fill", if flat_fill { 1.0f32 } else { 0.0f32 }),
+        Uniform::new(
+            "center_flat_fill",
+            if center_flat_fill { 1.0f32 } else { 0.0f32 },
+        ),
+        Uniform::new("fill_alpha", fill_alpha.clamp(0.0, 1.0)),
+    ];
+
+    frame.render_texture_from_to(
+        texture,
+        src,
+        dest,
+        &[damage],
+        &[],
+        Transform::Normal,
+        alpha.clamp(0.0, 1.0),
+        Some(program),
+        &uniforms,
+    )?;
+
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum NodeRoundShape {
+    Circle,
+    Square,
+    Squircle,
+}
+
+impl NodeRoundShape {
+    fn shadow_corner_radius(self, radius: i32) -> f32 {
+        match self {
+            NodeRoundShape::Circle => radius.max(1) as f32,
+            NodeRoundShape::Square => 0.0,
+            NodeRoundShape::Squircle => radius.max(1) as f32 * 0.42,
+        }
+    }
+}
+
+fn draw_shader_label(
+    frame: &mut GlesFrame<'_, '_>,
+    st: &Halley,
+    rounded: bool,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    corner_radius: f32,
+    border_px: f32,
+    alpha: f32,
+    border_color: Color32F,
+    fill_color: Color32F,
+    damage: Rectangle<i32, Physical>,
+) -> Result<(), Box<dyn Error>> {
+    let Some(texture) = st.ui.render_state.gpu.node_circle_texture.as_ref() else {
+        return Ok(());
+    };
+    let Some(program) = st.ui.render_state.ui_rect_program(rounded) else {
+        return Ok(());
+    };
+
+    let w = w.max(1);
+    let h = h.max(1);
+    let dest = Rectangle::<i32, Physical>::new((x, y).into(), (w, h).into());
+    let tex_size = texture.size();
+    let src = Rectangle::<f64, Buffer>::new(
+        (0.0, 0.0).into(),
+        (tex_size.w as f64, tex_size.h as f64).into(),
+    );
+    let uniforms = [
+        Uniform::new(
+            "node_color",
+            (
+                border_color.r(),
+                border_color.g(),
+                border_color.b(),
+                border_color.a(),
+            ),
+        ),
+        Uniform::new(
+            "fill_color",
+            (
+                fill_color.r(),
+                fill_color.g(),
+                fill_color.b(),
+                fill_color.a(),
+            ),
+        ),
+        Uniform::new("rect_size", (w as f32, h as f32)),
+        Uniform::new(
+            "inner_rect_size",
+            (
+                (w as f32 - border_px * 2.0).max(1.0),
+                (h as f32 - border_px * 2.0).max(1.0),
+            ),
+        ),
+        Uniform::new(
+            "inner_rect_offset",
+            (border_px.max(0.0), border_px.max(0.0)),
+        ),
+        Uniform::new("corner_radius", corner_radius),
+        Uniform::new("inner_corner_radius", (corner_radius - border_px).max(0.0)),
+        Uniform::new("border_px", border_px),
+    ];
+
+    frame.render_texture_from_to(
+        texture,
+        src,
+        dest,
+        &[damage],
+        &[],
+        Transform::Normal,
+        alpha.clamp(0.0, 1.0),
+        Some(program),
+        &uniforms,
+    )?;
+
+    Ok(())
+}
+
+fn node_ring_color(st: &Halley, hovered: bool, alpha: f32) -> Color32F {
+    themed_node_ring_color(&st.runtime.tuning, hovered, alpha)
+}
+
+fn node_fill_color(st: &Halley, hovered: bool) -> Color32F {
+    themed_node_fill_color(&st.runtime.tuning, hovered)
+}
+
+fn node_fill_uses_flat_mode(st: &Halley) -> bool {
+    !matches!(
+        st.runtime.tuning.node_background_color,
+        NodeBackgroundColorMode::Auto | NodeBackgroundColorMode::Theme
+    )
+}
+
+fn node_label_text_color(fill_color: Color32F, alpha: f32) -> Color32F {
+    themed_node_label_text_color(fill_color, alpha)
+}
+
+fn node_label_fill_color(st: &Halley, hovered: bool, alpha: f32) -> Color32F {
+    themed_node_label_fill_color(&st.runtime.tuning, hovered, alpha)
+}
+
+fn node_icon_glyph(st: &Halley, id: halley_core::field::NodeId, fallback: &str) -> Option<char> {
+    Some(node_app_icon_fallback_glyph(
+        st.model.node_app_ids.get(&id).map(String::as_str),
+        fallback,
+    ))
+}
+
+#[inline]
+pub(crate) fn node_markers_need_app_icon_resources(policy: NodeDisplayPolicy) -> bool {
+    !matches!(policy, NodeDisplayPolicy::Off)
+}
+
+#[inline]
+pub(crate) fn node_app_icon_texture_allowed(policy: NodeDisplayPolicy, highlighted: bool) -> bool {
+    match policy {
+        NodeDisplayPolicy::Off => false,
+        NodeDisplayPolicy::Hover => highlighted,
+        NodeDisplayPolicy::Always => true,
+    }
+}
+
+#[inline]
+pub(crate) fn node_app_icon_fallback_glyph(app_id: Option<&str>, fallback: &str) -> char {
+    app_id
+        .filter(|app_id| !app_id.trim().is_empty())
+        .unwrap_or(fallback)
+        .chars()
+        .find(|ch| ch.is_ascii_alphanumeric())
+        .unwrap_or('?')
+        .to_ascii_uppercase()
+}
+
+// ---------------------------------------------------------------------------
+// Active surface collection
+// ---------------------------------------------------------------------------
+
+#[allow(clippy::type_complexity)]
+pub(crate) fn collect_hover_preview(
+    renderer: &mut GlesRenderer,
+    st: &mut Halley,
+    size: Size<i32, Physical>,
+    monitor: &str,
+    node_surface_map: &HashMap<
+        halley_core::field::NodeId,
+        smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
+    >,
+    hovered_preview_id: Option<halley_core::field::NodeId>,
+    overlay_hover_preview: Option<(halley_core::field::NodeId, (i32, i32), bool)>,
+    hover_node: Option<halley_core::field::NodeId>,
+    now: Instant,
+) -> Option<HoverPreviewCard> {
+    let _ = hover_node;
+
+    let preview_target = overlay_hover_preview
+        .map(|preview| preview.0)
+        .or(hovered_preview_id);
+    let (preview_id, preview_mix_raw) = st
+        .ui
+        .render_state
+        .node_preview_hover_anim_for_monitor(monitor, preview_target)?;
+    let wl = node_surface_map.get(&preview_id)?;
+    let (node_state, node_pos, label_len) = st
+        .model
+        .field
+        .node(preview_id)
+        .map(|n| (n.state.clone(), n.pos, n.label.len()))?;
+
+    let live_overlay_anchor = overlay_hover_preview
+        .filter(|preview| preview.0 == preview_id)
+        .map(|preview| (preview.1, preview.2));
+    let fading_overlay_preview = hovered_preview_id.is_none() && overlay_hover_preview.is_none();
+    let overlay_anchor = {
+        let preview_state = st
+            .ui
+            .render_state
+            .view
+            .node_preview_hover
+            .entry(monitor.to_string())
+            .or_default();
+        if preview_state.node != Some(preview_id) {
+            preview_state.overlay_anchor = None;
+        }
+        if let Some(anchor) = live_overlay_anchor {
+            preview_state.overlay_anchor = Some(anchor);
+        }
+        if live_overlay_anchor.is_some() {
+            live_overlay_anchor
+        } else if fading_overlay_preview && preview_state.node == Some(preview_id) {
+            preview_state.overlay_anchor
+        } else {
+            None
+        }
+    };
+    if overlay_anchor.is_none()
+        && !matches!(
+            node_state,
+            halley_core::field::NodeState::Node | halley_core::field::NodeState::Core
+        )
+    {
+        return None;
+    }
+
+    let bbox = bbox_from_surface_tree(wl, (0, 0));
+    if bbox.size.w <= 0 || bbox.size.h <= 0 {
+        return None;
+    }
+
+    let preview_mix = ease_in_out_cubic(preview_mix_raw.clamp(0.0, 1.0));
+    let anim = anim_style_for(st, preview_id, node_state.clone(), now);
+
+    const PROXY_TO_MARKER_START: f32 = 0.50;
+    const PROXY_TO_MARKER_END: f32 = 0.20;
+    let marker_mix_lin = ((PROXY_TO_MARKER_START - anim.scale)
+        / (PROXY_TO_MARKER_START - PROXY_TO_MARKER_END))
+        .clamp(0.0, 1.0);
+    let marker_mix = ease_in_out_cubic(marker_mix_lin);
+    let mut preview_size_base = ((size.w.min(size.h) as f32) * 0.30).round() as i32;
+    preview_size_base = preview_size_base.clamp(220, 360);
+
+    let clamp_to_viewport = overlay_anchor.is_none();
+    let (bx, by, bw, bh) = if let Some(((anchor_x, anchor_y), prefer_left)) = overlay_anchor {
+        let side = preview_size_base.clamp(220, 360);
+        let _ = prefer_left;
+        let preview_x = anchor_x - side / 2;
+        let preview_y = anchor_y - side / 2;
+        (preview_x, preview_y, side, side)
+    } else {
+        let p = node_pos;
+        let _ = marker_mix;
+        let (cx, cy) = world_to_screen(st, size.w, size.h, p.x, p.y);
+        let (dot_half, _, _, _) = node_marker_metrics(st, label_len, anim.scale);
+        let render_pad = 8;
+        node_marker_bounds(cx, cy, dot_half, 0, 0, dot_half * 2, render_pad)
+    };
+
+    let inset = 12i32;
+    let source_side = bbox.size.w.max(bbox.size.h).max(1);
+    let base_side = (source_side + inset * 2).clamp(120, preview_size_base);
+    let preview_size = ((base_side as f32) * (0.94 + 0.06 * preview_mix))
+        .round()
+        .max(120.0) as i32;
+
+    let anchor_cx = bx + (bw / 2);
+    let anchor_cy = by + (bh / 2);
+    let mut preview_x = anchor_cx - (preview_size / 2);
+    let mut preview_y = anchor_cy - (preview_size / 2);
+    if clamp_to_viewport {
+        preview_x = preview_x.clamp(10, (size.w - preview_size - 10).max(10));
+        preview_y = preview_y.clamp(10, (size.h - preview_size - 10).max(10));
+    }
+
+    let fade = (preview_mix * preview_mix).clamp(0.0, 1.0);
+    if fade <= 0.01 {
+        return None;
+    }
+
+    let cache_miss = st
+        .ui
+        .render_state
+        .cache
+        .window_offscreen_cache
+        .get(&preview_id)
+        .is_none_or(|cache| {
+            !cache.matches_size(bbox.size.w, bbox.size.h)
+                || cache.texture.is_none()
+                || cache.bbox.is_none()
+                || !cache.has_content
+                || cache.dirty
+        });
+    if cache_miss && !crate::window::node_requires_live_surface_render(st, preview_id) {
+        st.ui
+            .render_state
+            .ensure_window_offscreen_cache(preview_id, bbox.size.w, bbox.size.h, now);
+        if let Ok(offscreen) = render_surface_tree_to_texture(renderer, wl, 1.0, None)
+            && let Some(cache) = st
+                .ui
+                .render_state
+                .cache
+                .window_offscreen_cache
+                .get_mut(&preview_id)
+        {
+            cache.texture = Some(offscreen.texture);
+            cache.bbox = Some(offscreen.bbox);
+            cache.has_content = offscreen.has_content;
+            cache.mark_clean(now);
+        }
+    }
+
+    Some(HoverPreviewCard {
+        node_id: preview_id,
+        rect: Rectangle::<i32, Physical>::new(
+            (preview_x, preview_y).into(),
+            (preview_size, preview_size).into(),
+        ),
+        alpha: fade,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Node marker drawing
+// ---------------------------------------------------------------------------
+
+pub(crate) fn draw_node_markers(
+    frame: &mut GlesFrame<'_, '_>,
+    st: &mut Halley,
+    size: Size<i32, Physical>,
+    render_nodes: &[NodeSnapshot],
+    hover_node: Option<halley_core::field::NodeId>,
+    damage: Rectangle<i32, Physical>,
+    now: Instant,
+) -> Result<(), Box<dyn Error>> {
+    for NodeSnapshot {
+        id,
+        state: node_state,
+        pos: node_pos,
+        label: node_label,
+    } in render_nodes
+    {
+        let id = *id;
+        let node_pos = *node_pos;
+        let node_op = st.runtime.tuning.node_opacity;
+
+        let anim = anim_style_for(st, id, node_state.clone(), now);
+
+        if !matches!(
+            node_state,
+            halley_core::field::NodeState::Node | halley_core::field::NodeState::Core
+        ) {
+            continue;
+        }
+
+        let p = st
+            .ui
+            .render_state
+            .landmark_slide_position(id, node_pos, now);
+
+        const PROXY_TO_MARKER_START: f32 = 0.50;
+        const PROXY_TO_MARKER_END: f32 = 0.20;
+        let marker_mix_lin = ((PROXY_TO_MARKER_START - anim.scale)
+            / (PROXY_TO_MARKER_START - PROXY_TO_MARKER_END))
+            .clamp(0.0, 1.0);
+        let marker_mix = ease_in_out_cubic(marker_mix_lin);
+
+        let (sx, sy) = world_to_screen(st, size.w, size.h, p.x, p.y);
+        let hovered = hover_node == Some(id);
+        let focused = st.model.focus_state.primary_interaction_focus == Some(id);
+        let highlighted = hovered || focused;
+        let is_core = *node_state == halley_core::field::NodeState::Core;
+        let hover_mix = ease_in_out_cubic(st.ui.render_state.node_label_hover_mix(id, highlighted));
+        let border_mix = ease_in_out_cubic(((0.304 - anim.scale) / 0.004).clamp(0.0, 1.0));
+        let icon_mix = st
+            .ui
+            .render_state
+            .anim_track_elapsed_for(id, node_state.clone(), now)
+            .map(|elapsed| {
+                let elapsed_ms = elapsed.as_millis() as u64;
+                let fade_t = elapsed_ms.saturating_sub(NODE_ICON_FADE_DELAY_MS) as f32
+                    / NODE_ICON_FADE_MS as f32;
+                ease_in_out_cubic(fade_t.clamp(0.0, 1.0))
+            })
+            .unwrap_or(0.0);
+
+        let (dot_half, _, _, _) = node_marker_metrics(st, node_label.len(), anim.scale);
+        let core_border_px = 5.0f32;
+        let render_radius = if is_core {
+            ((dot_half as f32 * 1.68) + core_border_px).round() as i32
+        } else {
+            (dot_half as f32 * 1.5).round() as i32
+        };
+        let round_shape = if is_core {
+            NodeRoundShape::Circle
+        } else {
+            match st.runtime.tuning.node_shape {
+                ShapeStyle::Square => NodeRoundShape::Square,
+                ShapeStyle::Squircle => NodeRoundShape::Squircle,
+            }
+        };
+
+        let dot_alpha = (anim.alpha * marker_mix).clamp(0.0, 1.0);
+        if dot_alpha <= 0.01 {
+            continue;
+        }
+
+        let allow_app_icon =
+            node_app_icon_texture_allowed(st.runtime.tuning.node_show_app_icons, highlighted);
+        let icon_alpha = (dot_alpha * icon_mix).clamp(0.0, 1.0);
+
+        let ring_mix = if is_core {
+            dot_alpha.max(border_mix)
+        } else {
+            border_mix
+        };
+        if ring_mix > 0.01 {
+            let border_frac = if is_core {
+                (core_border_px / render_radius as f32).clamp(0.04, 0.5)
+            } else {
+                (3.0 / render_radius as f32).clamp(0.01, 0.5)
+            };
+            let nc = node_ring_color(st, hover_mix > 0.02, 1.0);
+            // node_color.rgb = border ring colour; .a = border_px / radius
+            // fill_color.rgb  = node fill colour (inner fill + outer halo)
+            let node_color = Color32F::new(nc.r(), nc.g(), nc.b(), border_frac);
+            let fill_color = node_fill_color(st, highlighted);
+            let fill_flat = node_fill_uses_flat_mode(st);
+            draw_shadow_rect(
+                frame,
+                &st.ui.render_state,
+                st.runtime.tuning.effects.shadows.node,
+                Rectangle::<i32, Physical>::new(
+                    (sx - render_radius, sy - render_radius).into(),
+                    (render_radius * 2, render_radius * 2).into(),
+                ),
+                round_shape.shadow_corner_radius(render_radius),
+                ring_mix,
+                damage,
+            )?;
+            draw_shader_circle(
+                frame,
+                st,
+                sx,
+                sy,
+                render_radius,
+                round_shape,
+                ring_mix,
+                node_op,
+                node_color,
+                fill_color,
+                fill_flat,
+                icon_alpha > 0.01,
+                damage,
+            )?;
+        }
+        if icon_alpha > 0.01 {
+            let mut drew_real_icon = false;
+            if icon_alpha > 0.01
+                && allow_app_icon
+                && is_core
+                && let Some(icon) = crate::render::cluster_core_icon_texture(st, focused)
+            {
+                let side = ((render_radius * 2) as f32 * st.runtime.tuning.node_icon_size * 0.98)
+                    .round() as i32;
+                let side = side.clamp(16, 42);
+                let dest = Rectangle::<i32, Physical>::new(
+                    (sx - side / 2, sy - side / 2).into(),
+                    (side, side).into(),
+                );
+                let src = Rectangle::<f64, Buffer>::new(
+                    (0.0, 0.0).into(),
+                    (icon.width as f64, icon.height as f64).into(),
+                );
+                frame.render_texture_from_to(
+                    &icon.texture,
+                    src,
+                    dest,
+                    &[damage],
+                    &[],
+                    Transform::Normal,
+                    icon_alpha,
+                    None,
+                    &[],
+                )?;
+                drew_real_icon = true;
+            }
+            if !drew_real_icon
+                && icon_alpha > 0.01
+                && allow_app_icon
+                && let Some(app_id) = st.model.node_app_ids.get(&id)
+                && let Some(crate::render::state::NodeAppIconCacheEntry::Ready(icon)) =
+                    st.ui.render_state.cache.node_app_icon_cache.get(app_id)
+            {
+                let side =
+                    ((render_radius * 2) as f32 * st.runtime.tuning.node_icon_size).round() as i32;
+                let side = side.clamp(16, 42);
+                let dest = Rectangle::<i32, Physical>::new(
+                    (sx - side / 2, sy - side / 2).into(),
+                    (side, side).into(),
+                );
+                let src = Rectangle::<f64, Buffer>::new(
+                    (0.0, 0.0).into(),
+                    (icon.width as f64, icon.height as f64).into(),
+                );
+                frame.render_texture_from_to(
+                    &icon.texture,
+                    src,
+                    dest,
+                    &[damage],
+                    &[],
+                    Transform::Normal,
+                    icon_alpha,
+                    None,
+                    &[],
+                )?;
+                drew_real_icon = true;
+            }
+
+            if !drew_real_icon && let Some(icon) = node_icon_glyph(st, id, node_label) {
+                let scale = if render_radius >= 24 { 3 } else { 2 };
+                let icon_text = icon.to_string();
+                let (tw, th) = ui_text_size(st, &icon_text, scale);
+                let text_x = sx - (tw / 2);
+                let text_y = sy - (th / 2);
+                draw_ui_text(
+                    frame,
+                    st,
+                    text_x,
+                    text_y,
+                    &icon_text,
+                    scale,
+                    Color32F::new(0.18, 0.21, 0.26, 0.92 * icon_alpha),
+                    damage,
+                )?;
+            }
+        }
+        if st.node_user_pinned(id) {
+            let offset = ((render_radius as f32) * 0.78).round() as i32;
+            let cx = match st.runtime.tuning.pins.corner {
+                PinBadgeCorner::TopLeft => sx - offset,
+                PinBadgeCorner::TopRight => sx + offset,
+            };
+            let cy = sy - offset;
+            draw_pin_badge(
+                frame,
+                st,
+                PinBadgeLayout {
+                    cx,
+                    cy,
+                    radius: crate::render::pin_icon::scaled_pin_badge_radius(
+                        st,
+                        (render_radius / 3).clamp(7, 12),
+                    ),
+                    alpha: dot_alpha,
+                },
+                damage,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        node_app_icon_fallback_glyph, node_app_icon_texture_allowed,
+        node_markers_need_app_icon_resources,
+    };
+    use halley_config::NodeDisplayPolicy;
+
+    #[test]
+    fn node_marker_icon_texture_policy_honors_off_hover_and_always() {
+        assert!(!node_markers_need_app_icon_resources(
+            NodeDisplayPolicy::Off
+        ));
+        assert!(!node_app_icon_texture_allowed(
+            NodeDisplayPolicy::Off,
+            false
+        ));
+        assert!(!node_app_icon_texture_allowed(NodeDisplayPolicy::Off, true));
+
+        assert!(node_markers_need_app_icon_resources(
+            NodeDisplayPolicy::Hover
+        ));
+        assert!(!node_app_icon_texture_allowed(
+            NodeDisplayPolicy::Hover,
+            false
+        ));
+        assert!(node_app_icon_texture_allowed(
+            NodeDisplayPolicy::Hover,
+            true
+        ));
+
+        assert!(node_markers_need_app_icon_resources(
+            NodeDisplayPolicy::Always
+        ));
+        assert!(node_app_icon_texture_allowed(
+            NodeDisplayPolicy::Always,
+            false
+        ));
+        assert!(node_app_icon_texture_allowed(
+            NodeDisplayPolicy::Always,
+            true
+        ));
+    }
+
+    #[test]
+    fn node_icon_fallback_glyph_prefers_app_id_initial() {
+        assert_eq!(node_app_icon_fallback_glyph(Some("firefox"), "Window"), 'F');
+        assert_eq!(
+            node_app_icon_fallback_glyph(Some("org.wezfurlong.wezterm"), "Window"),
+            'O'
+        );
+        assert_eq!(node_app_icon_fallback_glyph(None, "Window"), 'W');
+    }
+}
+
+pub(crate) fn draw_closing_node_markers(
+    frame: &mut GlesFrame<'_, '_>,
+    st: &mut Halley,
+    _size: Size<i32, Physical>,
+    animations: &[ClosingWindowAnimationSnapshot],
+    damage: Rectangle<i32, Physical>,
+) -> Result<(), Box<dyn Error>> {
+    for animation in animations {
+        let ClosingWindowAnimationKind::Node {
+            screen_pos,
+            label,
+            state,
+        } = &animation.kind
+        else {
+            continue;
+        };
+
+        let alpha = (1.0 - animation.progress).clamp(0.0, 1.0);
+        if alpha <= 0.01 {
+            continue;
+        }
+
+        let (sx, sy) = *screen_pos;
+        let is_core = *state == halley_core::field::NodeState::Core;
+        let anim_scale = 0.30;
+        let (dot_half, _, _, _) = node_marker_metrics(st, label.len(), anim_scale);
+        let core_border_px = 5.0f32;
+        let render_radius = if is_core {
+            ((dot_half as f32 * 1.68) + core_border_px).round() as i32
+        } else {
+            (dot_half as f32 * 1.5).round() as i32
+        };
+        let round_shape = if is_core {
+            NodeRoundShape::Circle
+        } else {
+            match st.runtime.tuning.node_shape {
+                ShapeStyle::Square => NodeRoundShape::Square,
+                ShapeStyle::Squircle => NodeRoundShape::Squircle,
+            }
+        };
+        let border_frac = if is_core {
+            (core_border_px / render_radius as f32).clamp(0.04, 0.5)
+        } else {
+            (3.0 / render_radius as f32).clamp(0.01, 0.5)
+        };
+        let nc = node_ring_color(st, false, 1.0);
+        let node_color = Color32F::new(nc.r(), nc.g(), nc.b(), border_frac);
+        let fill_color = node_fill_color(st, false);
+        let fill_flat = node_fill_uses_flat_mode(st);
+        let node_op = st.runtime.tuning.node_opacity;
+
+        draw_shader_circle(
+            frame,
+            st,
+            sx,
+            sy,
+            render_radius,
+            round_shape,
+            alpha,
+            node_op,
+            node_color,
+            fill_color,
+            fill_flat,
+            false,
+            damage,
+        )?;
+    }
+
+    Ok(())
+}
+
+pub(crate) fn draw_node_hover_labels(
+    frame: &mut GlesFrame<'_, '_>,
+    st: &mut Halley,
+    size: Size<i32, Physical>,
+    render_nodes: &[NodeSnapshot],
+    hover_node: Option<halley_core::field::NodeId>,
+    damage: Rectangle<i32, Physical>,
+    now: Instant,
+) -> Result<(), Box<dyn Error>> {
+    if st.runtime.tuning.node_show_labels == NodeDisplayPolicy::Off {
+        return Ok(());
+    }
+
+    for node in render_nodes {
+        if !matches!(
+            node.state,
+            halley_core::field::NodeState::Node | halley_core::field::NodeState::Core
+        ) {
+            continue;
+        }
+
+        let anim = anim_style_for(st, node.id, node.state.clone(), now);
+        let dot_alpha = (anim.alpha
+            * ease_in_out_cubic(((0.50 - anim.scale) / (0.50 - 0.20)).clamp(0.0, 1.0)))
+        .clamp(0.0, 1.0);
+        if dot_alpha <= 0.01 {
+            continue;
+        }
+
+        let hover_mix = match st.runtime.tuning.node_show_labels {
+            NodeDisplayPolicy::Off => 0.0,
+            NodeDisplayPolicy::Hover => st
+                .ui
+                .render_state
+                .node_label_hover_mix(node.id, hover_node == Some(node.id)),
+            NodeDisplayPolicy::Always => 1.0,
+        };
+        // cube the hover_mix so the whole animation is back-loaded — nothing
+        // happens until well into the hover, then it rushes in
+        let reveal_mix = ease_in_out_cubic(hover_mix * hover_mix * hover_mix);
+        let label_fade = ((reveal_mix - 0.30) / 0.55).clamp(0.0, 1.0);
+        if label_fade <= 0.01 {
+            continue;
+        }
+        let label_slide = ((reveal_mix - 0.15) / 0.65).clamp(0.0, 1.0);
+        let label_grow = ((reveal_mix - 0.40) / 0.55).clamp(0.0, 1.0);
+
+        let label_pos = st
+            .ui
+            .render_state
+            .landmark_slide_position(node.id, node.pos, now);
+        let (sx, sy) = world_to_screen(st, size.w, size.h, label_pos.x, label_pos.y);
+        let (dot_half, base_label_gap, base_label_w, base_label_h) =
+            node_marker_metrics(st, node.label.len(), anim.scale);
+        let label_gap = ((base_label_gap as f32) * (1.0 + 0.45 * label_grow)).round() as i32;
+        let label_w_target =
+            ((((base_label_w as f32) * 1.80).round() as i32 + 1) & !1).clamp(72, 240);
+        // Round to even so label_h / 2 centering is always exact — odd dims cause
+        // a 0.5px vertical drift that steps jaggedly each animation frame.
+        let label_w = ((((base_label_w as f32) * (1.0 + 0.80 * label_grow)).round() as i32 + 1)
+            & !1)
+            .clamp(72, 240);
+        let label_h = (((base_label_h as f32) * (1.0 + 0.55 * label_grow)).round() as i32 + 1) & !1;
+
+        let margin = 12;
+        let side_gap = dot_half + label_gap.max(10);
+        let prefer_left = sx + side_gap + label_w_target + margin > size.w;
+        let label_x_target = if prefer_left {
+            sx - side_gap - label_w
+        } else {
+            sx + side_gap
+        };
+        let label_x_start = if prefer_left {
+            label_x_target + 44
+        } else {
+            label_x_target - 44
+        };
+        let label_x = ((label_x_start as f32)
+            + ((label_x_target - label_x_start) as f32) * label_slide)
+            .round() as i32;
+        let label_y_target = sy - (label_h / 2);
+        let label_y = (label_y_target as f32 + (1.0 - label_slide) * 10.0).round() as i32;
+
+        let final_x = label_x.clamp(margin, (size.w - label_w - margin).max(margin));
+        let final_y = label_y.clamp(margin, (size.h - label_h - margin).max(margin));
+
+        let hovered = hover_node == Some(node.id);
+        let fill_color = node_label_fill_color(st, hovered, 1.0);
+        draw_shader_label(
+            frame,
+            st,
+            st.runtime.tuning.node_label_shape == ShapeStyle::Squircle,
+            final_x,
+            final_y,
+            label_w.max(1),
+            label_h.max(1),
+            (label_h as f32) * 0.32,
+            0.0,
+            1.0,
+            fill_color,
+            fill_color,
+            damage,
+        )?;
+
+        let text_scale = 2;
+        let char_advance = 5 * text_scale + text_scale;
+        let max_chars = ((label_w - 20).max(0) / char_advance).max(1) as usize;
+        let mut text = node.label.clone();
+        if text.chars().count() > max_chars {
+            let keep = max_chars.saturating_sub(3);
+            text = text.chars().take(keep).collect::<String>();
+            text.push_str("...");
+        }
+        let (text_w, text_h) = ui_text_size(st, &text, text_scale);
+        let text_x = final_x + ((label_w - text_w).max(0) / 2);
+        let text_y = final_y + ((label_h - text_h).max(0) / 2);
+        draw_ui_text(
+            frame,
+            st,
+            text_x,
+            text_y,
+            &text,
+            text_scale,
+            node_label_text_color(fill_color, 0.94 * dot_alpha * label_fade),
+            damage,
+        )?;
+    }
+
+    Ok(())
+}

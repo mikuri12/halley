@@ -1,0 +1,72 @@
+#![allow(unused_imports)]
+
+use std::time::Instant;
+
+use smithay::{
+    backend::allocator::dmabuf::Dmabuf,
+    backend::renderer::utils::on_commit_buffer_handler,
+    delegate_background_effect, delegate_compositor, delegate_cursor_shape, delegate_data_control,
+    delegate_data_device, delegate_dmabuf, delegate_drm_syncobj, delegate_fractional_scale,
+    delegate_idle_notify, delegate_layer_shell, delegate_output, delegate_pointer_constraints,
+    delegate_pointer_gestures, delegate_presentation, delegate_primary_selection,
+    delegate_relative_pointer, delegate_seat, delegate_shm, delegate_viewporter,
+    delegate_xdg_activation, delegate_xdg_decoration, delegate_xdg_shell,
+    input::{Seat, SeatHandler, SeatState, pointer::CursorImageStatus},
+    output::Output,
+    reexports::wayland_server::{Client, Resource, backend::ObjectId, protocol::wl_seat},
+    utils::Serial,
+    wayland::{
+        background_effect::BackgroundEffectState,
+        buffer::BufferHandler,
+        compositor::{CompositorClientState, CompositorHandler, CompositorState},
+        cursor_shape::CursorShapeManagerState,
+        dmabuf::{DmabufFeedback, DmabufGlobal, DmabufHandler, ImportNotifier},
+        drm_syncobj::{DrmSyncobjHandler, DrmSyncobjState},
+        fractional_scale::{FractionalScaleHandler, FractionalScaleManagerState},
+        idle_notify::{IdleNotifierHandler, IdleNotifierState},
+        output::{OutputHandler, OutputManagerState},
+        pointer_constraints::{PointerConstraintsHandler, PointerConstraintsState},
+        pointer_gestures::PointerGesturesState,
+        relative_pointer::RelativePointerManagerState,
+        selection::{
+            SelectionHandler,
+            data_device::{
+                DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
+            },
+            primary_selection::{
+                PrimarySelectionHandler, PrimarySelectionState, set_primary_focus,
+            },
+            wlr_data_control::{DataControlHandler, DataControlState},
+        },
+        shell::{
+            wlr_layer::{
+                Layer, LayerSurface, LayerSurfaceConfigure, WlrLayerShellHandler,
+                WlrLayerShellState,
+            },
+            xdg::{
+                PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+                decoration::{XdgDecorationHandler, XdgDecorationState},
+            },
+        },
+        shm::{ShmHandler, ShmState},
+        xdg_activation::{
+            XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
+        },
+    },
+};
+
+use crate::compositor::root::Halley;
+
+pub(crate) mod activation;
+pub(crate) mod background_effect;
+pub(crate) mod client_state;
+mod handlers;
+mod handlers_xdg;
+pub(crate) mod portal;
+mod screencopy;
+pub(crate) mod session_lock;
+
+pub use client_state::ClientState;
+
+delegate_presentation!(Halley);
+delegate_fractional_scale!(Halley);

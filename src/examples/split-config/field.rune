@@ -1,0 +1,52 @@
+# Field navigation and spatial-window behavior.
+
+field:
+  gap 20.0
+  active-windows-allowed 5
+
+  pins:
+    corner "top-right"
+    colour "#d65d26"
+    background-colour "#1d2021"
+    size 1.0
+  end
+
+  close-restore-focus true
+  close-restore-pan "if-offscreen"
+
+  zoom:
+    enabled true
+    step 1.10
+    min 0.35
+    max 1.35
+    smooth true
+    smooth-rate 12.5
+  end
+end
+
+placement:
+  expanded:
+    strategy "center"
+    fallback "center"
+    find-empty-mode "best-effort"
+  end
+
+  landmarks:
+    strategy "nearest-free"
+    normal-blocker "relocate"
+    pinned-blocker "preserve"
+  end
+
+  reveal:
+    enabled true
+    max-pan-px 360
+    animation-ms 180
+    pan-to-new "if-needed"
+  end
+end
+
+decay:
+  node-after-ms 180000
+  collapse-after-ms 900000
+  cleanup-after-ms 3600000
+end

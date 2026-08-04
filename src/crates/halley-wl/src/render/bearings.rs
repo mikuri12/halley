@@ -1,0 +1,1245 @@
+use std::collections::HashSet;
+use std::error::Error;
+
+use halley_core::{
+    bearings::{Bearing, bearing_to_point, bearings_for_visible_nodes},
+    field::{NodeId, Vec2},
+    viewport::Viewport,
+};
+use smithay::{
+    backend::renderer::{
+        Color32F, Texture,
+        gles::{GlesFrame, Uniform},
+    },
+    utils::{Buffer, Physical, Rectangle, Transform},
+};
+
+use crate::compositor::root::Halley;
+use crate::overlay::overlay_fill_and_text_colors;
+use crate::render::app_icon::{ensure_app_icon_resources_for_node_ids, node_app_icon_entry};
+use crate::render::draw_primitives::draw_rect;
+use crate::render::pin_icon::{PinBadgeLayout, draw_pin_badge};
+use crate::render::state::NodeAppIconCacheEntry;
+use crate::render::{node_app_icon_fallback_glyph, node_app_icon_texture_allowed};
+use crate::text::{draw_ui_text, prime_ui_text, ui_text_size};
+
+#[derive(Clone, Debug)]
+pub(crate) struct BearingChipLayout {
+    pub(crate) node_id: NodeId,
+    pub(crate) chip_rect: Rectangle<i32, Physical>,
+    pub(crate) icon_rect: Option<Rectangle<i32, Physical>>,
+    pub(crate) label: String,
+    pub(crate) distance_text: Option<String>,
+    pub(crate) distance_rect: Option<Rectangle<i32, Physical>>,
+    pub(crate) distance_pos: Option<(i32, i32)>,
+    pub(crate) pinned: bool,
+    pub(crate) alpha: f32,
+}
+
+const CHIP_PAD_X: i32 = 10;
+const CHIP_PAD_Y: i32 = 7;
+const EDGE_PAD: i32 = 16;
+const LABEL_SCALE: i32 = 2;
+const META_SCALE: i32 = 2;
+const ICON_SIZE: i32 = 16;
+const ICON_TEXT_GAP: i32 = 6;
+const PIN_BADGE_RADIUS: i32 = 7;
+const PIN_BADGE_GAP: i32 = 7;
+const DISTANCE_GAP: i32 = 4;
+const META_PAD_X: i32 = 7;
+const META_PAD_Y: i32 = 4;
+const GROUP_GAP: i32 = 10;
+const MAX_LABEL_CHARS: usize = 24;
+const MIN_DISTANCE_ALPHA: f32 = 0.34;
+const DISTANCE_HIDE_MULTIPLIER: f32 = 1.5;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BearingLane {
+    NW,
+    N,
+    NE,
+    W,
+    E,
+    SW,
+    S,
+    SE,
+}
+
+impl BearingLane {
+    fn all() -> [Self; 8] {
+        [
+            Self::NW,
+            Self::N,
+            Self::NE,
+            Self::W,
+            Self::E,
+            Self::SW,
+            Self::S,
+            Self::SE,
+        ]
+    }
+
+    fn from_bearing(bearing: Bearing) -> Self {
+        match bearing {
+            Bearing::NW => Self::NW,
+            Bearing::N => Self::N,
+            Bearing::NE => Self::NE,
+            Bearing::W => Self::W,
+            Bearing::E => Self::E,
+            Bearing::SW => Self::SW,
+            Bearing::S => Self::S,
+            Bearing::SE => Self::SE,
+        }
+    }
+
+    fn uses_horizontal_axis(self) -> bool {
+        matches!(self, Self::N | Self::S)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BearingSize {
+    chip_w: i32,
+    chip_h: i32,
+    show_icon: bool,
+    distance_rect_w: i32,
+    distance_rect_h: i32,
+    distance_block_h: i32,
+}
+
+impl BearingSize {
+    fn total_height(self) -> i32 {
+        self.distance_block_h + self.chip_h
+    }
+
+    fn primary_extent(self, lane: BearingLane) -> i32 {
+        if lane.uses_horizontal_axis() {
+            self.chip_w
+        } else {
+            self.total_height()
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct BearingCandidate {
+    node_id: NodeId,
+    lane: BearingLane,
+    projected: f32,
+    distance: f32,
+    label: String,
+    size: BearingSize,
+    pinned: bool,
+}
+
+#[derive(Clone, Debug)]
+struct BearingGroup {
+    lane: BearingLane,
+    projected: f32,
+    node_id: NodeId,
+    label: String,
+    distance: f32,
+    size: BearingSize,
+    pinned: bool,
+    alpha: f32,
+}
+
+fn color32f_to_rgba(color: Color32F) -> [u8; 4] {
+    [
+        (color.r().clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color.g().clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color.b().clamp(0.0, 1.0) * 255.0).round() as u8,
+        255,
+    ]
+}
+
+pub(crate) fn ensure_bearing_icon_resources(
+    renderer: &mut smithay::backend::renderer::gles::GlesRenderer,
+    st: &mut Halley,
+    monitor: &str,
+) -> Result<(), Box<dyn Error>> {
+    if !st.runtime.tuning.bearings.show_icons {
+        return Ok(());
+    }
+
+    // Keep the cluster-core bearing glyph ready, tinted to the chip text colour.
+    // This is independent of the app-icon path below (cluster cores have no app id)
+    // and of `node_show_app_icons`, since the bearing icon slot is gated only on
+    // `bearings.show_icons`.
+    let (_, chip_text_color) = overlay_fill_and_text_colors(&st.runtime.tuning);
+    crate::render::ensure_bearing_cluster_icon_resources(
+        renderer,
+        st,
+        color32f_to_rgba(chip_text_color),
+    )?;
+
+    if !node_app_icon_texture_allowed(st.runtime.tuning.node_show_app_icons, false) {
+        return Ok(());
+    }
+
+    let viewport = bearings_viewport_for_monitor(st, monitor);
+    let mut node_ids = bearings_for_visible_nodes(&st.model.field, &viewport)
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect::<Vec<_>>();
+    if st.runtime.tuning.bearings.show_pinned {
+        for id in &st.model.workspace_state.user_pinned_nodes {
+            if !node_ids.contains(id) {
+                node_ids.push(*id);
+            }
+        }
+    }
+    let node_ids = node_ids
+        .into_iter()
+        .filter_map(|id| {
+            let node = st.model.field.node(id)?;
+            (node.kind == halley_core::field::NodeKind::Surface
+                && st
+                    .model
+                    .monitor_state
+                    .node_monitor
+                    .get(&id)
+                    .map(String::as_str)
+                    == Some(monitor)
+                && !node_intersects_bearings_view(st, monitor, id))
+            .then_some(id)
+        })
+        .collect::<Vec<_>>();
+    ensure_app_icon_resources_for_node_ids(renderer, st, node_ids)
+}
+
+pub(crate) fn collect_bearing_layouts(
+    st: &Halley,
+    screen_w: i32,
+    screen_h: i32,
+    monitor: &str,
+    ui_mix: f32,
+) -> Vec<BearingChipLayout> {
+    if ui_mix <= 0.002 {
+        return Vec::new();
+    }
+
+    let viewport = bearings_viewport_for_monitor(st, monitor);
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+    let mut bearing_nodes = bearings_for_visible_nodes(&st.model.field, &viewport)
+        .into_iter()
+        .map(|(id, bearing)| {
+            seen.insert(id);
+            (id, bearing, st.node_user_pinned(id))
+        })
+        .collect::<Vec<_>>();
+    if st.runtime.tuning.bearings.show_pinned {
+        for id in &st.model.workspace_state.user_pinned_nodes {
+            if seen.contains(id) {
+                continue;
+            }
+            let Some(node) = st.model.field.node(*id) else {
+                continue;
+            };
+            if !st.model.field.participates_in_field_view(*id) || !st.model.field.is_visible(*id) {
+                continue;
+            }
+            let Some(bearing) = bearing_to_point(&viewport, node.pos) else {
+                continue;
+            };
+            bearing_nodes.push((*id, bearing, true));
+        }
+    }
+
+    for (id, bearing, pinned) in bearing_nodes {
+        let Some(node) = st.model.field.node(id) else {
+            continue;
+        };
+        if !matches!(
+            node.kind,
+            halley_core::field::NodeKind::Surface | halley_core::field::NodeKind::Core
+        ) {
+            continue;
+        }
+        if st
+            .model
+            .monitor_state
+            .node_monitor
+            .get(&id)
+            .map(String::as_str)
+            != Some(monitor)
+        {
+            continue;
+        }
+        if node_intersects_bearings_view(st, monitor, id) {
+            continue;
+        }
+
+        let lane = BearingLane::from_bearing(bearing);
+        let distance = offscreen_distance_from_monitor_edge(st, monitor, id).unwrap_or(0.0);
+        let label = bearing_label(st, id, node.label.as_str());
+        let projected = projected_anchor_for_lane(st, monitor, id, lane, screen_w, screen_h);
+        let distance_text = st
+            .runtime
+            .tuning
+            .bearings
+            .show_distance
+            .then(|| format!("{:.0}px", distance.round()));
+        let size = bearing_size(
+            st,
+            label.as_str(),
+            st.runtime.tuning.bearings.show_icons,
+            distance_text.as_deref(),
+            pinned,
+        );
+
+        candidates.push(BearingCandidate {
+            node_id: id,
+            lane,
+            projected,
+            distance,
+            label,
+            size,
+            pinned,
+        });
+    }
+
+    let mut layouts = Vec::new();
+    for lane in BearingLane::all() {
+        let mut lane_candidates = candidates
+            .iter()
+            .filter(|candidate| candidate.lane == lane)
+            .cloned()
+            .collect::<Vec<_>>();
+        if lane_candidates.is_empty() {
+            continue;
+        }
+        lane_candidates.sort_by(|a, b| {
+            a.projected
+                .partial_cmp(&b.projected)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.node_id.as_u64().cmp(&b.node_id.as_u64()))
+        });
+
+        let groups = group_lane_candidates(st, lane_candidates, ui_mix)
+            .into_iter()
+            .filter(|group| group.alpha > 0.002)
+            .collect::<Vec<_>>();
+        if groups.is_empty() {
+            continue;
+        }
+        layouts.extend(layout_lane_groups(st, lane, groups, screen_w, screen_h));
+    }
+
+    let (_, chip_text_color) = overlay_fill_and_text_colors(&st.runtime.tuning);
+    for layout in &layouts {
+        prime_ui_text(st, layout.label.as_str(), LABEL_SCALE, chip_text_color);
+        if let Some(distance_text) = layout.distance_text.as_ref() {
+            prime_ui_text(st, distance_text, META_SCALE, chip_text_color);
+        }
+    }
+
+    layouts
+}
+
+pub(crate) fn bearing_hit_test(
+    st: &Halley,
+    screen_w: i32,
+    screen_h: i32,
+    monitor: &str,
+    sx: f32,
+    sy: f32,
+) -> Option<NodeId> {
+    let ui_mix = st
+        .ui
+        .render_state
+        .view
+        .bearings_mix
+        .get(monitor)
+        .copied()
+        .unwrap_or_else(|| {
+            if st.ui.render_state.bearings_visible() {
+                1.0
+            } else {
+                0.0
+            }
+        });
+    if ui_mix <= 0.05 {
+        return None;
+    }
+    let px = sx.round() as i32;
+    let py = sy.round() as i32;
+    collect_bearing_layouts(st, screen_w, screen_h, monitor, ui_mix)
+        .into_iter()
+        .find(|layout| rect_contains(layout.chip_rect, px, py))
+        .map(|layout| layout.node_id)
+}
+
+pub(crate) fn draw_bearings(
+    frame: &mut GlesFrame<'_, '_>,
+    st: &Halley,
+    damage: Rectangle<i32, Physical>,
+    layouts: &[BearingChipLayout],
+) -> Result<(), Box<dyn Error>> {
+    let rounded = st.runtime.tuning.window_border_radius_px() > 0;
+    let (chip_fill_color, chip_text_color) = overlay_fill_and_text_colors(&st.runtime.tuning);
+    let blur = st.runtime.tuning.bearings.blur;
+    for layout in layouts {
+        if layout.alpha <= 0.002 {
+            continue;
+        }
+
+        // Frosted backdrop behind the chip. Pass the chip's own fade alpha so the
+        // blur recedes in lockstep with the bearing as the node goes far. Skip the
+        // (full-framebuffer) capture once the chip is nearly invisible.
+        if blur && layout.alpha >= 0.04 {
+            crate::overlay::draw_overlay_backdrop_blur(
+                frame,
+                layout.chip_rect,
+                if rounded { 11.0 } else { 0.0 },
+                damage,
+                layout.alpha,
+            )?;
+        }
+
+        draw_shader_label(
+            frame,
+            st,
+            rounded,
+            layout.chip_rect.loc.x,
+            layout.chip_rect.loc.y,
+            layout.chip_rect.size.w,
+            layout.chip_rect.size.h,
+            11.0,
+            0.0,
+            layout.alpha,
+            Color32F::new(
+                chip_fill_color.r(),
+                chip_fill_color.g(),
+                chip_fill_color.b(),
+                0.0,
+            ),
+            Color32F::new(
+                chip_fill_color.r(),
+                chip_fill_color.g(),
+                chip_fill_color.b(),
+                0.92 * layout.alpha,
+            ),
+            damage,
+        )?;
+
+        if let Some(distance_rect) = layout.distance_rect
+            && let Some((distance_x, distance_y)) = layout.distance_pos
+            && let Some(distance_text) = layout.distance_text.as_ref()
+        {
+            draw_shader_label(
+                frame,
+                st,
+                rounded,
+                distance_rect.loc.x,
+                distance_rect.loc.y,
+                distance_rect.size.w,
+                distance_rect.size.h,
+                8.0,
+                0.0,
+                layout.alpha,
+                Color32F::new(
+                    chip_fill_color.r(),
+                    chip_fill_color.g(),
+                    chip_fill_color.b(),
+                    0.0,
+                ),
+                Color32F::new(
+                    chip_fill_color.r(),
+                    chip_fill_color.g(),
+                    chip_fill_color.b(),
+                    0.88 * layout.alpha,
+                ),
+                damage,
+            )?;
+            draw_ui_text(
+                frame,
+                st,
+                distance_x,
+                distance_y,
+                distance_text,
+                META_SCALE,
+                Color32F::new(
+                    chip_text_color.r(),
+                    chip_text_color.g(),
+                    chip_text_color.b(),
+                    layout.alpha * 0.96,
+                ),
+                damage,
+            )?;
+        }
+
+        let text_x = layout.chip_rect.loc.x
+            + CHIP_PAD_X
+            + if layout.icon_rect.is_some() {
+                ICON_SIZE + ICON_TEXT_GAP
+            } else {
+                0
+            };
+        let (_, label_h) = ui_text_size(st, layout.label.as_str(), LABEL_SCALE);
+        let text_y = layout.chip_rect.loc.y + (layout.chip_rect.size.h - label_h) / 2;
+        draw_ui_text(
+            frame,
+            st,
+            text_x,
+            text_y,
+            layout.label.as_str(),
+            LABEL_SCALE,
+            Color32F::new(
+                chip_text_color.r(),
+                chip_text_color.g(),
+                chip_text_color.b(),
+                layout.alpha,
+            ),
+            damage,
+        )?;
+
+        if let Some(icon_rect) = layout.icon_rect {
+            draw_bearing_icon(
+                frame,
+                st,
+                layout.node_id,
+                icon_rect,
+                damage,
+                layout.alpha,
+                chip_text_color,
+            )?;
+        }
+
+        if layout.pinned {
+            draw_pin_badge(
+                frame,
+                st,
+                PinBadgeLayout {
+                    cx: layout.chip_rect.loc.x + layout.chip_rect.size.w
+                        - CHIP_PAD_X
+                        - PIN_BADGE_RADIUS,
+                    cy: layout.chip_rect.loc.y + layout.chip_rect.size.h / 2,
+                    radius: PIN_BADGE_RADIUS,
+                    alpha: layout.alpha,
+                },
+                damage,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn group_lane_candidates(
+    st: &Halley,
+    candidates: Vec<BearingCandidate>,
+    ui_mix: f32,
+) -> Vec<BearingGroup> {
+    let mut groups = Vec::new();
+    let mut current: Vec<BearingCandidate> = Vec::new();
+
+    for candidate in candidates {
+        if let Some(previous) = current.last() {
+            let min_gap = crowding_threshold(previous.lane, previous.size, candidate.size);
+            if candidate.projected - previous.projected > min_gap {
+                groups.push(finalize_group(st, std::mem::take(&mut current), ui_mix));
+            }
+        }
+        current.push(candidate);
+    }
+
+    if !current.is_empty() {
+        groups.push(finalize_group(st, current, ui_mix));
+    }
+
+    groups
+}
+
+fn finalize_group(st: &Halley, members: Vec<BearingCandidate>, ui_mix: f32) -> BearingGroup {
+    let member_count = members.len();
+    let pinned = members.iter().any(|member| member.pinned);
+    let lane = members[0].lane;
+    let nearest = members
+        .iter()
+        .min_by(|a, b| {
+            a.distance
+                .partial_cmp(&b.distance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.node_id.as_u64().cmp(&b.node_id.as_u64()))
+        })
+        .expect("bearing group should not be empty");
+    let projected = members
+        .iter()
+        .map(|candidate| candidate.projected)
+        .sum::<f32>()
+        / member_count as f32;
+    let label = if member_count == 1 {
+        nearest.label.clone()
+    } else {
+        format!("{member_count} nodes")
+    };
+    let distance = nearest.distance;
+    let distance_text = st
+        .runtime
+        .tuning
+        .bearings
+        .show_distance
+        .then(|| format!("{:.0}px", distance.round()));
+    let size = bearing_size(
+        st,
+        label.as_str(),
+        member_count == 1 && st.runtime.tuning.bearings.show_icons,
+        distance_text.as_deref(),
+        pinned,
+    );
+    let distance_fade = if pinned {
+        1.0
+    } else {
+        bearing_distance_alpha(st.runtime.tuning.bearings.fade_distance, distance)
+    };
+
+    BearingGroup {
+        lane,
+        projected,
+        node_id: nearest.node_id,
+        label,
+        distance,
+        size,
+        pinned,
+        alpha: (ui_mix * distance_fade).clamp(0.0, 1.0),
+    }
+}
+
+fn bearing_distance_alpha(fade_distance: f32, distance: f32) -> f32 {
+    if fade_distance <= f32::EPSILON {
+        return 1.0;
+    }
+
+    let fade_end = fade_distance * DISTANCE_HIDE_MULTIPLIER;
+    if distance <= fade_distance {
+        let t = (distance / fade_distance).clamp(0.0, 1.0);
+        return MIN_DISTANCE_ALPHA + (1.0 - t) * (1.0 - MIN_DISTANCE_ALPHA);
+    }
+    if distance >= fade_end {
+        return 0.0;
+    }
+
+    let tail_t = ((distance - fade_distance) / (fade_end - fade_distance)).clamp(0.0, 1.0);
+    (MIN_DISTANCE_ALPHA * (1.0 - tail_t)).clamp(0.0, 1.0)
+}
+
+fn layout_lane_groups(
+    st: &Halley,
+    lane: BearingLane,
+    groups: Vec<BearingGroup>,
+    screen_w: i32,
+    screen_h: i32,
+) -> Vec<BearingChipLayout> {
+    let mut groups = groups;
+    if groups.is_empty() {
+        return Vec::new();
+    }
+
+    groups.sort_by(|a, b| {
+        a.projected
+            .partial_cmp(&b.projected)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.node_id.as_u64().cmp(&b.node_id.as_u64()))
+    });
+
+    let mut centers = groups
+        .iter()
+        .map(|group| {
+            let (min_center, max_center) = lane_center_bounds(lane, group.size, screen_w, screen_h);
+            group.projected.clamp(min_center, max_center)
+        })
+        .collect::<Vec<_>>();
+
+    for index in 1..centers.len() {
+        let min_sep = crowding_threshold(lane, groups[index - 1].size, groups[index].size);
+        let min_center = centers[index - 1] + min_sep;
+        if centers[index] < min_center {
+            centers[index] = min_center;
+        }
+    }
+    for index in (0..centers.len().saturating_sub(1)).rev() {
+        let (_, max_center) = lane_center_bounds(lane, groups[index].size, screen_w, screen_h);
+        centers[index] = centers[index].min(max_center);
+        let max_prev = centers[index + 1]
+            - crowding_threshold(lane, groups[index].size, groups[index + 1].size);
+        if centers[index] > max_prev {
+            centers[index] = max_prev;
+        }
+    }
+    for index in 1..centers.len() {
+        let min_sep = crowding_threshold(lane, groups[index - 1].size, groups[index].size);
+        let min_center = centers[index - 1] + min_sep;
+        if centers[index] < min_center {
+            centers[index] = min_center;
+        }
+    }
+
+    groups
+        .into_iter()
+        .zip(centers)
+        .map(|(group, center)| build_layout_from_group(st, group, center, screen_w, screen_h))
+        .collect()
+}
+
+fn build_layout_from_group(
+    st: &Halley,
+    group: BearingGroup,
+    center: f32,
+    screen_w: i32,
+    screen_h: i32,
+) -> BearingChipLayout {
+    let chip_w = group.size.chip_w;
+    let chip_h = group.size.chip_h;
+    let total_h = group.size.total_height();
+    let total_top = (center.round() as i32) - total_h / 2;
+    let chip_y_vertical = total_top + group.size.distance_block_h;
+    let distance_text = st
+        .runtime
+        .tuning
+        .bearings
+        .show_distance
+        .then(|| format!("{:.0}px", group.distance.round()));
+
+    let (chip_x, chip_y) = match group.lane {
+        BearingLane::N => (
+            (center.round() as i32) - chip_w / 2,
+            EDGE_PAD + group.size.distance_block_h,
+        ),
+        BearingLane::S => (
+            (center.round() as i32) - chip_w / 2,
+            screen_h - EDGE_PAD - chip_h,
+        ),
+        BearingLane::W => (EDGE_PAD, chip_y_vertical),
+        BearingLane::E => (screen_w - EDGE_PAD - chip_w, chip_y_vertical),
+        BearingLane::NW => (EDGE_PAD, chip_y_vertical),
+        BearingLane::NE => (screen_w - EDGE_PAD - chip_w, chip_y_vertical),
+        BearingLane::SW => (EDGE_PAD, chip_y_vertical),
+        BearingLane::SE => (screen_w - EDGE_PAD - chip_w, chip_y_vertical),
+    };
+
+    let icon_rect = group.size.show_icon.then(|| {
+        Rectangle::new(
+            (chip_x + CHIP_PAD_X, chip_y + (chip_h - ICON_SIZE) / 2).into(),
+            (ICON_SIZE, ICON_SIZE).into(),
+        )
+    });
+    let distance_rect = distance_text.as_ref().map(|_| {
+        Rectangle::new(
+            (
+                chip_x + ((chip_w - group.size.distance_rect_w) / 2),
+                chip_y - DISTANCE_GAP - group.size.distance_rect_h,
+            )
+                .into(),
+            (group.size.distance_rect_w, group.size.distance_rect_h).into(),
+        )
+    });
+    let distance_pos = distance_text
+        .as_ref()
+        .zip(distance_rect)
+        .map(|(text, rect)| {
+            let (_, text_h) = ui_text_size(st, text, META_SCALE);
+            (
+                rect.loc.x + META_PAD_X,
+                rect.loc.y + (rect.size.h - text_h) / 2,
+            )
+        });
+
+    BearingChipLayout {
+        node_id: group.node_id,
+        chip_rect: Rectangle::new((chip_x, chip_y).into(), (chip_w, chip_h).into()),
+        icon_rect,
+        label: group.label,
+        distance_text,
+        distance_rect,
+        distance_pos,
+        pinned: group.pinned,
+        alpha: group.alpha,
+    }
+}
+
+fn bearing_size(
+    st: &Halley,
+    label: &str,
+    show_icon: bool,
+    distance_text: Option<&str>,
+    pinned: bool,
+) -> BearingSize {
+    let (label_w, label_h) = ui_text_size(st, label, LABEL_SCALE);
+    let icon_gap = if show_icon {
+        ICON_SIZE + ICON_TEXT_GAP
+    } else {
+        0
+    };
+    let pin_gap = if pinned {
+        PIN_BADGE_RADIUS * 2 + PIN_BADGE_GAP
+    } else {
+        0
+    };
+    let chip_w = (CHIP_PAD_X * 2 + icon_gap + label_w + pin_gap).max(44);
+    let chip_h = (CHIP_PAD_Y * 2 + label_h.max(if show_icon { ICON_SIZE } else { 0 })).max(24);
+    let (distance_rect_w, distance_rect_h, distance_block_h) = distance_text
+        .map(|text| {
+            let (text_w, text_h) = ui_text_size(st, text, META_SCALE);
+            let rect_w = text_w + META_PAD_X * 2;
+            let rect_h = text_h + META_PAD_Y * 2;
+            (rect_w, rect_h, rect_h + DISTANCE_GAP)
+        })
+        .unwrap_or((0, 0, 0));
+
+    BearingSize {
+        chip_w,
+        chip_h,
+        show_icon,
+        distance_rect_w,
+        distance_rect_h,
+        distance_block_h,
+    }
+}
+
+fn crowding_threshold(lane: BearingLane, left: BearingSize, right: BearingSize) -> f32 {
+    ((left.primary_extent(lane) + right.primary_extent(lane)) as f32 * 0.5) + GROUP_GAP as f32
+}
+
+fn lane_center_bounds(
+    lane: BearingLane,
+    size: BearingSize,
+    screen_w: i32,
+    screen_h: i32,
+) -> (f32, f32) {
+    if lane.uses_horizontal_axis() {
+        let half = size.chip_w as f32 * 0.5;
+        (
+            EDGE_PAD as f32 + half,
+            screen_w as f32 - EDGE_PAD as f32 - half,
+        )
+    } else {
+        let half = size.total_height() as f32 * 0.5;
+        (
+            EDGE_PAD as f32 + half,
+            screen_h as f32 - EDGE_PAD as f32 - half,
+        )
+    }
+}
+
+fn bearings_viewport_for_monitor(st: &Halley, monitor: &str) -> Viewport {
+    let (center, size) = monitor_view_center_size(st, monitor);
+    Viewport::new(center, size)
+}
+
+fn monitor_view_center_size(st: &Halley, monitor: &str) -> (Vec2, Vec2) {
+    if st.model.monitor_state.current_monitor == monitor {
+        (st.model.viewport.center, st.model.zoom_ref_size)
+    } else {
+        st.model
+            .monitor_state
+            .monitors
+            .get(monitor)
+            .map(|space| (space.viewport.center, space.zoom_ref_size))
+            .unwrap_or((st.model.viewport.center, st.model.zoom_ref_size))
+    }
+}
+
+fn node_intersects_bearings_view(st: &Halley, monitor: &str, node_id: NodeId) -> bool {
+    let Some(node) = st.model.field.node(node_id) else {
+        return false;
+    };
+    let ext = bearings_collision_extents(st, node);
+    let (center, size) = monitor_view_center_size(st, monitor);
+    let min_x = center.x - size.x * 0.5;
+    let max_x = center.x + size.x * 0.5;
+    let min_y = center.y - size.y * 0.5;
+    let max_y = center.y + size.y * 0.5;
+
+    let node_min_x = node.pos.x - ext.left;
+    let node_max_x = node.pos.x + ext.right;
+    let node_min_y = node.pos.y - ext.top;
+    let node_max_y = node.pos.y + ext.bottom;
+
+    node_max_x > min_x && node_min_x < max_x && node_max_y > min_y && node_min_y < max_y
+}
+
+fn projected_anchor_for_lane(
+    st: &Halley,
+    monitor: &str,
+    node_id: NodeId,
+    lane: BearingLane,
+    screen_w: i32,
+    screen_h: i32,
+) -> f32 {
+    let Some(node) = st.model.field.node(node_id) else {
+        return if lane.uses_horizontal_axis() {
+            screen_w as f32 * 0.5
+        } else {
+            screen_h as f32 * 0.5
+        };
+    };
+    let (center, size) = monitor_view_center_size(st, monitor);
+    let dx = node.pos.x - center.x;
+    let dy = node.pos.y - center.y;
+    let half_w = size.x * 0.5;
+    let half_h = size.y * 0.5;
+    let tx = if dx.abs() <= f32::EPSILON {
+        f32::INFINITY
+    } else {
+        half_w / dx.abs()
+    };
+    let ty = if dy.abs() <= f32::EPSILON {
+        f32::INFINITY
+    } else {
+        half_h / dy.abs()
+    };
+    let t = tx.min(ty);
+    let edge_x = center.x + dx * t;
+    let edge_y = center.y + dy * t;
+
+    let scalar = if lane.uses_horizontal_axis() {
+        project_horizontal_edge_scalar(center.x, half_w, size.x, edge_x, screen_w)
+    } else {
+        project_vertical_edge_scalar(center.y, half_h, size.y, edge_y, screen_h)
+    };
+
+    scalar.clamp(
+        EDGE_PAD as f32,
+        if lane.uses_horizontal_axis() {
+            screen_w as f32 - EDGE_PAD as f32
+        } else {
+            screen_h as f32 - EDGE_PAD as f32
+        },
+    )
+}
+
+fn project_horizontal_edge_scalar(
+    center_x: f32,
+    half_w: f32,
+    size_x: f32,
+    edge_x: f32,
+    screen_w: i32,
+) -> f32 {
+    ((edge_x - (center_x - half_w)) / size_x.max(1.0)) * screen_w as f32
+}
+
+fn project_vertical_edge_scalar(
+    center_y: f32,
+    half_h: f32,
+    size_y: f32,
+    edge_y: f32,
+    screen_h: i32,
+) -> f32 {
+    ((edge_y - (center_y - half_h)) / size_y.max(1.0)) * screen_h as f32
+}
+
+fn bearing_label(st: &Halley, node_id: NodeId, title: &str) -> String {
+    let base = if !title.trim().is_empty() {
+        title.trim().to_string()
+    } else if let Some(app_id) = st.model.node_app_ids.get(&node_id) {
+        app_id.clone()
+    } else {
+        format!("Node {}", node_id.as_u64())
+    };
+    truncate_label(base.as_str())
+}
+
+fn offscreen_distance_from_monitor_edge(
+    st: &Halley,
+    monitor: &str,
+    node_id: NodeId,
+) -> Option<f32> {
+    let node = st.model.field.node(node_id)?;
+    let ext = bearings_collision_extents(st, node);
+    let (center, size) = monitor_view_center_size(st, monitor);
+    let min_x = center.x - size.x * 0.5;
+    let max_x = center.x + size.x * 0.5;
+    let min_y = center.y - size.y * 0.5;
+    let max_y = center.y + size.y * 0.5;
+
+    let node_min_x = node.pos.x - ext.left;
+    let node_max_x = node.pos.x + ext.right;
+    let node_min_y = node.pos.y - ext.top;
+    let node_max_y = node.pos.y + ext.bottom;
+
+    let overflow_x = if node_max_x <= min_x {
+        min_x - node_max_x
+    } else if node_min_x >= max_x {
+        node_min_x - max_x
+    } else {
+        0.0
+    };
+    let overflow_y = if node_max_y <= min_y {
+        min_y - node_max_y
+    } else if node_min_y >= max_y {
+        node_min_y - max_y
+    } else {
+        0.0
+    };
+
+    Some((overflow_x * overflow_x + overflow_y * overflow_y).sqrt())
+}
+
+fn bearings_collision_extents(
+    st: &Halley,
+    node: &halley_core::field::Node,
+) -> crate::compositor::overlap::system::CollisionExtents {
+    match node.state {
+        halley_core::field::NodeState::Node | halley_core::field::NodeState::Core => {
+            st.collision_extents_for_node(node)
+        }
+        halley_core::field::NodeState::Active | halley_core::field::NodeState::Drifting => {
+            st.surface_window_collision_extents(node)
+        }
+    }
+}
+
+fn truncate_label(label: &str) -> String {
+    let mut out = String::new();
+    for ch in label.chars().take(MAX_LABEL_CHARS) {
+        out.push(ch);
+    }
+    if label.chars().count() > MAX_LABEL_CHARS {
+        out.push_str("...");
+    }
+    out
+}
+
+fn rect_contains(rect: Rectangle<i32, Physical>, x: i32, y: i32) -> bool {
+    x >= rect.loc.x
+        && x < rect.loc.x + rect.size.w
+        && y >= rect.loc.y
+        && y < rect.loc.y + rect.size.h
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vertical_projection_decreases_when_edge_moves_up() {
+        let upper = project_vertical_edge_scalar(0.0, 50.0, 100.0, -25.0, 1000);
+        let lower = project_vertical_edge_scalar(0.0, 50.0, 100.0, 25.0, 1000);
+
+        assert!(upper < lower, "upper={upper} lower={lower}");
+        assert_eq!(upper, 250.0);
+        assert_eq!(lower, 750.0);
+    }
+
+    #[test]
+    fn distance_alpha_reaches_zero_at_hide_multiplier() {
+        let fade_distance = 1200.0;
+
+        assert_eq!(bearing_distance_alpha(fade_distance, 0.0), 1.0);
+        assert!(
+            (bearing_distance_alpha(fade_distance, fade_distance) - MIN_DISTANCE_ALPHA).abs()
+                < 1e-6
+        );
+        assert!(bearing_distance_alpha(fade_distance, fade_distance * 1.25) > 0.0);
+        assert_eq!(
+            bearing_distance_alpha(fade_distance, fade_distance * DISTANCE_HIDE_MULTIPLIER),
+            0.0
+        );
+        assert_eq!(
+            bearing_distance_alpha(fade_distance, fade_distance * 2.0),
+            0.0
+        );
+    }
+
+    #[test]
+    fn pinned_far_offscreen_node_stays_in_bearings() {
+        let dh = smithay::reexports::wayland_server::Display::<Halley>::new()
+            .expect("display")
+            .handle();
+        let mut st = Halley::new_for_test(&dh, halley_config::RuntimeTuning::default());
+        st.runtime.tuning.bearings.fade_distance = 100.0;
+        let id = st.model.field.spawn_surface(
+            "pinned",
+            halley_core::field::Vec2 {
+                x: 10_000.0,
+                y: 0.0,
+            },
+            halley_core::field::Vec2 { x: 320.0, y: 240.0 },
+        );
+        st.assign_node_to_monitor(id, "default");
+
+        assert!(collect_bearing_layouts(&st, 1920, 1080, "default", 1.0).is_empty());
+
+        assert!(st.set_node_user_pinned(id, true));
+        let layouts = collect_bearing_layouts(&st, 1920, 1080, "default", 1.0);
+
+        assert_eq!(layouts.len(), 1);
+        assert_eq!(layouts[0].node_id, id);
+        assert!(layouts[0].pinned);
+        assert!(layouts[0].alpha > 0.99);
+    }
+}
+
+fn draw_bearing_icon(
+    frame: &mut GlesFrame<'_, '_>,
+    st: &Halley,
+    node_id: NodeId,
+    rect: Rectangle<i32, Physical>,
+    damage: Rectangle<i32, Physical>,
+    alpha: f32,
+    chip_text_color: Color32F,
+) -> Result<(), Box<dyn Error>> {
+    // Cluster cores have no app id; draw the cluster glyph (already tinted to the
+    // chip text colour) rather than the app-icon fallback box + first-letter glyph.
+    if st
+        .model
+        .field
+        .node(node_id)
+        .is_some_and(|node| node.state == halley_core::field::NodeState::Core)
+    {
+        if let Some(icon) = crate::render::bearing_cluster_icon_texture(st) {
+            let src = Rectangle::<f64, Buffer>::new(
+                (0.0, 0.0).into(),
+                (icon.width as f64, icon.height as f64).into(),
+            );
+            frame.render_texture_from_to(
+                &icon.texture,
+                src,
+                rect,
+                &[damage],
+                &[],
+                Transform::Normal,
+                alpha,
+                None,
+                &[],
+            )?;
+        }
+        return Ok(());
+    }
+    if node_app_icon_texture_allowed(st.runtime.tuning.node_show_app_icons, false)
+        && let Some(NodeAppIconCacheEntry::Ready(icon)) = node_app_icon_entry(st, node_id)
+    {
+        let src = Rectangle::<f64, Buffer>::new(
+            (0.0, 0.0).into(),
+            (icon.width as f64, icon.height as f64).into(),
+        );
+        frame.render_texture_from_to(
+            &icon.texture,
+            src,
+            rect,
+            &[damage],
+            &[],
+            Transform::Normal,
+            alpha,
+            None,
+            &[],
+        )?;
+    } else {
+        draw_rect(
+            frame,
+            rect.loc.x,
+            rect.loc.y,
+            rect.size.w,
+            rect.size.h,
+            Color32F::new(0.22, 0.82, 0.92, alpha * 0.30),
+            damage,
+        )?;
+        let glyph = node_app_icon_fallback_glyph(
+            st.model.node_app_ids.get(&node_id).map(String::as_str),
+            st.model
+                .field
+                .node(node_id)
+                .map(|node| node.label.as_str())
+                .unwrap_or("?"),
+        )
+        .to_string();
+        let (text_w, text_h) = ui_text_size(st, &glyph, 2);
+        draw_ui_text(
+            frame,
+            st,
+            rect.loc.x + (rect.size.w - text_w) / 2,
+            rect.loc.y + (rect.size.h - text_h) / 2,
+            &glyph,
+            2,
+            Color32F::new(
+                chip_text_color.r(),
+                chip_text_color.g(),
+                chip_text_color.b(),
+                alpha,
+            ),
+            damage,
+        )?;
+    }
+    Ok(())
+}
+
+fn draw_shader_label(
+    frame: &mut GlesFrame<'_, '_>,
+    st: &Halley,
+    rounded: bool,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    corner_radius: f32,
+    border_px: f32,
+    alpha: f32,
+    border_color: Color32F,
+    fill_color: Color32F,
+    damage: Rectangle<i32, Physical>,
+) -> Result<(), Box<dyn Error>> {
+    let Some(texture) = st.ui.render_state.gpu.node_circle_texture.as_ref() else {
+        return Ok(());
+    };
+    let Some(program) = st.ui.render_state.ui_rect_program(rounded) else {
+        return Ok(());
+    };
+
+    let dest = Rectangle::<i32, Physical>::new((x, y).into(), (w.max(1), h.max(1)).into());
+    let tex_size = texture.size();
+    let src = Rectangle::<f64, Buffer>::new(
+        (0.0, 0.0).into(),
+        (tex_size.w as f64, tex_size.h as f64).into(),
+    );
+    let uniforms = [
+        Uniform::new(
+            "node_color",
+            (
+                border_color.r(),
+                border_color.g(),
+                border_color.b(),
+                border_color.a(),
+            ),
+        ),
+        Uniform::new(
+            "fill_color",
+            (
+                fill_color.r(),
+                fill_color.g(),
+                fill_color.b(),
+                fill_color.a(),
+            ),
+        ),
+        Uniform::new("rect_size", (w as f32, h as f32)),
+        Uniform::new(
+            "inner_rect_size",
+            (
+                (w as f32 - border_px * 2.0).max(1.0),
+                (h as f32 - border_px * 2.0).max(1.0),
+            ),
+        ),
+        Uniform::new(
+            "inner_rect_offset",
+            (border_px.max(0.0), border_px.max(0.0)),
+        ),
+        Uniform::new("corner_radius", corner_radius),
+        Uniform::new("inner_corner_radius", (corner_radius - border_px).max(0.0)),
+        Uniform::new("border_px", border_px),
+    ];
+
+    frame.render_texture_from_to(
+        texture,
+        src,
+        dest,
+        &[damage],
+        &[],
+        Transform::Normal,
+        alpha.clamp(0.0, 1.0),
+        Some(program),
+        &uniforms,
+    )?;
+
+    Ok(())
+}

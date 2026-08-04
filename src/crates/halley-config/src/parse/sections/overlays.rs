@@ -1,0 +1,157 @@
+use rune_cfg::RuneConfig;
+
+use crate::layout::RuntimeTuning;
+
+use super::super::primitives::{
+    pick_bool, pick_overlay_border_source, pick_overlay_color_mode, pick_overlay_shape,
+};
+
+pub(crate) fn load_overlays_section(cfg: &RuneConfig, out: &mut RuntimeTuning) {
+    out.overlay_style.background_color = pick_overlay_color_mode(
+        cfg,
+        &[
+            "overlay.background-colour",
+            "overlay.background_colour",
+            "overlay.background-color",
+            "overlay.background_color",
+            "overlays.background-colour",
+            "overlays.background_colour",
+            "overlays.background-color",
+            "overlays.background_color",
+        ],
+        out.overlay_style.background_color,
+    );
+    out.overlay_style.text_color = pick_overlay_color_mode(
+        cfg,
+        &[
+            "overlay.text-colour",
+            "overlay.text_colour",
+            "overlay.text-color",
+            "overlay.text_color",
+            "overlays.text-colour",
+            "overlays.text_colour",
+            "overlays.text-color",
+            "overlays.text_color",
+        ],
+        out.overlay_style.text_color,
+    );
+    out.overlay_style.error_color = pick_overlay_color_mode(
+        cfg,
+        &[
+            "overlay.error-colour",
+            "overlay.error_colour",
+            "overlay.error-color",
+            "overlay.error_color",
+            "overlays.error-colour",
+            "overlays.error_colour",
+            "overlays.error-color",
+            "overlays.error_color",
+        ],
+        out.overlay_style.error_color,
+    );
+    out.overlay_style.shape = pick_overlay_shape(
+        cfg,
+        &["overlay.shape", "overlays.shape"],
+        out.overlay_style.shape,
+    );
+    out.overlay_style.borders = pick_bool(
+        cfg,
+        &["overlay.borders", "overlays.borders"],
+        out.overlay_style.borders,
+    );
+    out.overlay_style.border_source = pick_overlay_border_source(
+        cfg,
+        &[
+            "overlay.border-source",
+            "overlay.border_source",
+            "overlays.border-source",
+            "overlays.border_source",
+        ],
+        out.overlay_style.border_source,
+    );
+    out.overlay_style.blur = pick_bool(
+        cfg,
+        &["overlay.blur", "overlays.blur"],
+        out.overlay_style.blur,
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use rune_cfg::RuneConfig;
+
+    use crate::layout::{OverlayBorderSource, OverlayColorMode, OverlayShape, RuntimeTuning};
+
+    use super::load_overlays_section;
+
+    #[test]
+    fn overlays_section_parses_palette_shape_and_borders() {
+        let cfg = RuneConfig::from_str(
+            r##"
+overlays:
+  background-colour "#22334480"
+  text-colour "dark"
+  error-colour "#fb4934"
+  shape "rounded"
+  borders false
+  border-source "secondary"
+end
+"##,
+        )
+        .expect("overlay config should parse");
+
+        let mut out = RuntimeTuning::default();
+        load_overlays_section(&cfg, &mut out);
+
+        assert_eq!(
+            out.overlay_style.background_color,
+            OverlayColorMode::Fixed {
+                r: 0x22 as f32 / 255.0,
+                g: 0x33 as f32 / 255.0,
+                b: 0x44 as f32 / 255.0,
+                a: 0x80 as f32 / 255.0,
+            }
+        );
+        assert_eq!(out.overlay_style.text_color, OverlayColorMode::Dark);
+        assert_eq!(
+            out.overlay_style.error_color,
+            OverlayColorMode::Fixed {
+                r: 0xfb as f32 / 255.0,
+                g: 0x49 as f32 / 255.0,
+                b: 0x34 as f32 / 255.0,
+                a: 1.0,
+            }
+        );
+        assert_eq!(out.overlay_style.shape, OverlayShape::Rounded);
+        assert!(!out.overlay_style.borders);
+        assert_eq!(
+            out.overlay_style.border_source,
+            OverlayBorderSource::Secondary
+        );
+    }
+
+    #[test]
+    fn overlay_defaults_enable_square_bordered_auto_palette() {
+        let defaults = RuntimeTuning::default();
+        assert_eq!(
+            defaults.overlay_style.background_color,
+            OverlayColorMode::Auto
+        );
+        assert_eq!(defaults.overlay_style.text_color, OverlayColorMode::Auto);
+        assert_eq!(
+            defaults.overlay_style.error_color,
+            OverlayColorMode::Fixed {
+                r: 0xfb as f32 / 255.0,
+                g: 0x49 as f32 / 255.0,
+                b: 0x34 as f32 / 255.0,
+                a: 1.0,
+            }
+        );
+        assert_eq!(defaults.overlay_style.shape, OverlayShape::Square);
+        assert!(defaults.overlay_style.borders);
+        assert_eq!(
+            defaults.overlay_style.border_source,
+            OverlayBorderSource::Primary
+        );
+    }
+}

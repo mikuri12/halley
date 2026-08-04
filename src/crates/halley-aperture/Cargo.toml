@@ -1,0 +1,29 @@
+[package]
+name = "halley-aperture"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+publish = false
+description = "A status bar and utility for the Halley Wayland compositor."
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+exclude.workspace = true
+
+[dependencies]
+chrono.workspace = true
+fontdb = "0.23.0"
+halley-api.workspace = true
+halley-config.workspace = true
+halley-ipc.workspace = true
+rusttype = "0.9.3"
+rune-cfg.workspace = true
+rustix = { version = "1.1.4", features = ["event"] }
+smithay-client-toolkit.workspace = true
+wayland-client.workspace = true
+
+[[bin]]
+name = "halley-aperture"
+path = "src/main.rs"

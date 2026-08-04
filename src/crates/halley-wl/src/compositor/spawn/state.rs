@@ -1,0 +1,672 @@
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::Instant;
+
+use halley_config::{
+    InitialWindowClusterParticipation, InitialWindowOverlapPolicy, InitialWindowSpawnPlacement,
+};
+use halley_core::decay::DecayLevel;
+use halley_core::field::{NodeId, Vec2};
+
+use super::Halley;
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SpawnFrontierPoint {
+    pub pos: Vec2,
+    pub score: f32,
+    pub dir: Vec2,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub(crate) struct SpawnPatch {
+    pub anchor: Vec2,
+    pub focus_node: Option<NodeId>,
+    pub focus_pos: Vec2,
+    pub growth_dir: Vec2,
+    pub placements_in_patch: u32,
+    pub frontier: Vec<SpawnFrontierPoint>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PendingSpawnPan {
+    pub node_id: NodeId,
+    pub target_center: Vec2,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ActiveSpawnPan {
+    pub node_id: NodeId,
+    pub pan_start_at_ms: u64,
+    pub reveal_at_ms: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct AppliedInitialWindowRule {
+    pub(crate) overlap_policy: InitialWindowOverlapPolicy,
+    pub(crate) spawn_placement: InitialWindowSpawnPlacement,
+    pub(crate) cluster_participation: InitialWindowClusterParticipation,
+    pub(crate) opacity: f32,
+    pub(crate) parent_node: Option<NodeId>,
+    pub(crate) suppress_reveal_pan: bool,
+    pub(crate) builtin_rule: Option<super::rules::BuiltinInitialWindowRule>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SpawnAnchorMode {
+    Focus,
+    View,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SpawnFocusOverride {
+    pub(crate) pos: Vec2,
+    pub(crate) size: Vec2,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SpawnPlacementExtents {
+    pub(crate) left: f32,
+    pub(crate) right: f32,
+    pub(crate) top: f32,
+    pub(crate) bottom: f32,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct InitialSpawnPlacement {
+    pub(crate) monitor: String,
+    pub(crate) anchor_pos: Vec2,
+    pub(crate) anchor_ext: Option<SpawnPlacementExtents>,
+    pub(crate) chosen_pos: Vec2,
+    pub(crate) dir: Option<Vec2>,
+    pub(crate) preserve_chosen_pos: bool,
+    pub(crate) view_center_reset: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct MonitorSpawnState {
+    pub(crate) spawn_cursor: u32,
+    pub(crate) spawn_patch: Option<SpawnPatch>,
+    pub(crate) spawn_anchor_mode: SpawnAnchorMode,
+    pub(crate) spawn_view_anchor: Vec2,
+    pub(crate) spawn_focus_override: Option<SpawnFocusOverride>,
+    pub(crate) spawn_pan_start_center: Option<Vec2>,
+    pub(crate) spawn_last_pan_ms: u64,
+}
+
+impl MonitorSpawnState {
+    pub(crate) fn new(view_anchor: Vec2) -> Self {
+        Self {
+            spawn_cursor: 0,
+            spawn_patch: None,
+            spawn_anchor_mode: SpawnAnchorMode::Focus,
+            spawn_view_anchor: view_anchor,
+            spawn_focus_override: None,
+            spawn_pan_start_center: None,
+            spawn_last_pan_ms: 0,
+        }
+    }
+}
+
+pub(crate) struct SpawnState {
+    pub pending_spawn_activate_at_ms: HashMap<NodeId, u64>,
+    pub(crate) pending_tiled_insert_reveal_at_ms: HashMap<NodeId, u64>,
+    pub(crate) pending_tiled_insert_preserve_focus: HashSet<NodeId>,
+    pub(crate) pending_spawn_monitor: Option<String>,
+    pub(crate) per_monitor: HashMap<String, MonitorSpawnState>,
+    pub(crate) pending_spawn_pan_queue: VecDeque<PendingSpawnPan>,
+    pub(crate) active_spawn_pan: Option<ActiveSpawnPan>,
+    pub(crate) applied_window_rules: HashMap<NodeId, AppliedInitialWindowRule>,
+    pub(crate) live_window_opacity: HashMap<NodeId, f32>,
+    pub(crate) pending_rule_rechecks: HashSet<NodeId>,
+    pub(crate) pending_initial_reveal: HashSet<NodeId>,
+    pub(crate) pending_initial_spawn_placement: Option<InitialSpawnPlacement>,
+    pub(crate) initial_spawn_placements: HashMap<NodeId, InitialSpawnPlacement>,
+    pub(crate) pending_pan_activate: Option<(NodeId, u64)>,
+}
+
+pub(crate) fn is_persistent_rule_top(st: &Halley, node_id: NodeId) -> bool {
+    st.model
+        .spawn_state
+        .applied_window_rules
+        .get(&node_id)
+        .is_some_and(|rule| {
+            matches!(
+                rule.builtin_rule,
+                Some(super::rules::BuiltinInitialWindowRule::PictureInPicture)
+            )
+        })
+}
+
+pub(crate) fn node_has_overlap_policy(st: &Halley, node_id: NodeId) -> bool {
+    if matches!(
+        st.runtime.tuning.cluster_layout_kind(),
+        halley_core::cluster_layout::ClusterWorkspaceLayoutKind::Stacking
+    ) {
+        return false;
+    }
+    st.model
+        .spawn_state
+        .applied_window_rules
+        .get(&node_id)
+        .is_some_and(|rule| rule.overlap_policy != InitialWindowOverlapPolicy::None)
+}
+
+/// Whether a client window should be drawn with backdrop blur this frame.
+///
+/// Combines the global `effects.blur` policy, the window's per-rule `blur`
+/// override, its resolved opacity, and an exclusion check for
+/// fullscreen/presentation/gamescope surfaces. See
+/// [`halley_config::window_blur_enabled`] for the precedence rules.
+pub(crate) fn node_wants_blur(st: &Halley, node_id: NodeId) -> bool {
+    let blur = &st.runtime.tuning.effects.blur;
+    if !blur.enabled {
+        return false;
+    }
+    let app_id = st.model.node_app_ids.get(&node_id).cloned();
+    let title = st.model.field.node(node_id).map(|node| node.label.clone());
+    let rule_blur =
+        super::rules::user_window_rule_blur_for_identity(st, app_id.as_deref(), title.as_deref());
+    let user_keybind_fullscreen = st
+        .model
+        .fullscreen_state
+        .fullscreen_origin
+        .get(&node_id)
+        .is_some_and(|origin| {
+            matches!(
+                origin,
+                crate::compositor::fullscreen::state::FullscreenOrigin::UserKeybind
+            )
+        });
+    let client_fullscreen = st.is_fullscreen_active(node_id) && !user_keybind_fullscreen;
+    let is_excluded = client_fullscreen
+        || node_has_overlap_policy(st, node_id)
+        || crate::window::node_is_game_like(st, node_id)
+        || app_id
+            .as_deref()
+            .is_some_and(|a| a.eq_ignore_ascii_case("gamescope"));
+    halley_config::window_blur_enabled(blur, rule_blur, node_rule_opacity(st, node_id), is_excluded)
+}
+
+pub(crate) fn node_rule_opacity(st: &Halley, node_id: NodeId) -> f32 {
+    st.model
+        .spawn_state
+        .live_window_opacity
+        .get(&node_id)
+        .copied()
+        .or_else(|| {
+            st.model
+                .spawn_state
+                .applied_window_rules
+                .get(&node_id)
+                .map(|rule| rule.opacity)
+        })
+        .unwrap_or(1.0)
+        .clamp(0.0, 1.0)
+}
+
+pub(crate) fn recompute_node_rule_opacity(st: &mut Halley, node_id: NodeId) -> bool {
+    let Some(node) = st.model.field.node(node_id) else {
+        st.model.spawn_state.live_window_opacity.remove(&node_id);
+        return false;
+    };
+    if node.kind != halley_core::field::NodeKind::Surface {
+        st.model.spawn_state.live_window_opacity.remove(&node_id);
+        return false;
+    }
+
+    let title = node.label.clone();
+    let app_id = st.model.node_app_ids.get(&node_id).cloned();
+    let next = super::rules::user_window_rule_opacity_for_identity(
+        st,
+        app_id.as_deref(),
+        Some(title.as_str()),
+    );
+    let previous = st
+        .model
+        .spawn_state
+        .live_window_opacity
+        .insert(node_id, next)
+        .or_else(|| {
+            st.model
+                .spawn_state
+                .applied_window_rules
+                .get(&node_id)
+                .map(|rule| rule.opacity)
+        })
+        .unwrap_or(1.0)
+        .clamp(0.0, 1.0);
+
+    if (previous - next).abs() > f32::EPSILON {
+        if next < 0.999 || previous < 0.999 {
+            st.model
+                .fullscreen_state
+                .clear_direct_scanout_for_node(node_id);
+        }
+        return true;
+    }
+    false
+}
+
+pub(crate) fn recompute_all_node_rule_opacities(st: &mut Halley) -> bool {
+    let node_ids = st.model.field.node_ids_all();
+    let mut changed = false;
+    for node_id in node_ids.iter().copied() {
+        changed |= recompute_node_rule_opacity(st, node_id);
+    }
+    let live_nodes: HashSet<NodeId> = node_ids.into_iter().collect();
+    st.model
+        .spawn_state
+        .live_window_opacity
+        .retain(|node_id, _| live_nodes.contains(node_id));
+    changed
+}
+
+pub(crate) fn node_floats_over_cluster(st: &Halley, node_id: NodeId) -> bool {
+    if matches!(
+        st.runtime.tuning.cluster_layout_kind(),
+        halley_core::cluster_layout::ClusterWorkspaceLayoutKind::Stacking
+    ) {
+        return false;
+    }
+    st.model
+        .spawn_state
+        .applied_window_rules
+        .get(&node_id)
+        .is_some_and(|rule| {
+            rule.cluster_participation == InitialWindowClusterParticipation::Float
+                || rule.overlap_policy != InitialWindowOverlapPolicy::None
+        })
+}
+
+pub(crate) fn node_floats_over_active_cluster(st: &Halley, node_id: NodeId) -> bool {
+    node_floats_over_cluster(st, node_id)
+        && st
+            .model
+            .monitor_state
+            .node_monitor
+            .get(&node_id)
+            .is_some_and(|monitor| st.active_cluster_workspace_for_monitor(monitor).is_some())
+}
+
+pub(crate) fn node_draws_above_fullscreen_on_monitor(
+    st: &Halley,
+    node_id: NodeId,
+    monitor: &str,
+) -> bool {
+    let Some(fullscreen_id) = st
+        .model
+        .fullscreen_state
+        .fullscreen_active_node
+        .get(monitor)
+        .copied()
+    else {
+        return false;
+    };
+    if fullscreen_id == node_id {
+        return false;
+    }
+    let Some(node) = st.model.field.node(node_id) else {
+        return false;
+    };
+    if node.state != halley_core::field::NodeState::Active || !st.model.field.is_visible(node_id) {
+        return false;
+    }
+    let explicitly_raised_above_fullscreen =
+        st.overlap_policy_stack_rank(node_id).0 > st.overlap_policy_stack_rank(fullscreen_id).0;
+    if !node_has_overlap_policy(st, node_id) && !explicitly_raised_above_fullscreen {
+        return false;
+    }
+
+    st.model
+        .monitor_state
+        .node_monitor
+        .get(&node_id)
+        .is_some_and(|node_monitor| node_monitor == monitor)
+}
+
+pub(crate) fn monitor_has_visible_overlap_policy_window(st: &Halley, monitor: &str) -> bool {
+    st.model
+        .field
+        .node_ids_all()
+        .into_iter()
+        .any(|node_id| node_draws_above_fullscreen_on_monitor(st, node_id, monitor))
+}
+
+pub(crate) fn default_spawn_view_anchor_for_monitor(st: &Halley, monitor: &str) -> Vec2 {
+    st.model
+        .monitor_state
+        .monitors
+        .get(monitor)
+        .map(|space| space.viewport.center)
+        .unwrap_or(st.model.viewport.center)
+}
+
+pub(crate) fn spawn_monitor_state(st: &Halley, monitor: &str) -> MonitorSpawnState {
+    st.model
+        .spawn_state
+        .per_monitor
+        .get(monitor)
+        .cloned()
+        .unwrap_or_else(|| {
+            MonitorSpawnState::new(default_spawn_view_anchor_for_monitor(st, monitor))
+        })
+}
+
+pub(crate) fn spawn_monitor_state_mut<'a>(
+    st: &'a mut Halley,
+    monitor: &str,
+) -> &'a mut MonitorSpawnState {
+    let view_anchor = default_spawn_view_anchor_for_monitor(st, monitor);
+    st.model
+        .spawn_state
+        .per_monitor
+        .entry(monitor.to_string())
+        .or_insert_with(|| MonitorSpawnState::new(view_anchor))
+}
+
+pub(crate) fn process_pending_spawn_activations(st: &mut Halley, now: Instant, now_ms: u64) {
+    let due_tiled_reveals: Vec<NodeId> = st
+        .model
+        .spawn_state
+        .pending_tiled_insert_reveal_at_ms
+        .iter()
+        .filter_map(|(&id, &at)| (now_ms >= at).then_some(id))
+        .collect();
+
+    for id in due_tiled_reveals {
+        if !st.ui.render_state.cache.window_geometry.contains_key(&id) {
+            continue;
+        }
+        let preserve_focus = st
+            .model
+            .spawn_state
+            .pending_tiled_insert_preserve_focus
+            .remove(&id);
+        st.model
+            .spawn_state
+            .pending_tiled_insert_reveal_at_ms
+            .remove(&id);
+        st.ui
+            .render_state
+            .window_animations
+            .cluster_tile_entry_pending
+            .insert(id);
+        let monitor = st
+            .model
+            .monitor_state
+            .node_monitor
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| st.model.monitor_state.current_monitor.clone());
+        if st
+            .active_cluster_workspace_for_monitor(monitor.as_str())
+            .is_some()
+        {
+            st.layout_active_cluster_workspace_for_monitor(monitor.as_str(), now_ms);
+            let _ = st.model.field.set_decay_level(id, DecayLevel::Hot);
+            st.set_recent_top_node(id, now + std::time::Duration::from_millis(1200));
+            crate::compositor::workspace::state::mark_active_transition(st, id, now, 620);
+            if !preserve_focus {
+                st.set_interaction_focus(Some(id), 30_000, now);
+            }
+            st.request_maintenance();
+        }
+    }
+
+    let due: Vec<NodeId> = st
+        .model
+        .spawn_state
+        .pending_spawn_activate_at_ms
+        .iter()
+        .filter_map(|(&id, &at)| (now_ms >= at).then_some(id))
+        .collect();
+
+    for id in due {
+        st.model
+            .spawn_state
+            .pending_spawn_activate_at_ms
+            .remove(&id);
+        if !st.model.field.is_visible(id) {
+            continue;
+        }
+        let Some(n) = st.model.field.node(id) else {
+            continue;
+        };
+        if n.kind != halley_core::field::NodeKind::Surface {
+            continue;
+        }
+        if crate::compositor::workspace::state::preserve_collapsed_surface(st, id) {
+            continue;
+        }
+        let node_monitor = st
+            .model
+            .monitor_state
+            .node_monitor
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| st.model.monitor_state.current_monitor.clone());
+        let cluster_local = st
+            .active_cluster_workspace_for_monitor(node_monitor.as_str())
+            .is_some();
+        let _ = st.model.field.set_decay_level(id, DecayLevel::Hot);
+        if let Some((_, _, w, h)) = st.ui.render_state.cache.window_geometry.get(&id) {
+            st.model
+                .workspace_state
+                .last_active_size
+                .insert(id, Vec2 { x: *w, y: *h });
+        }
+        crate::compositor::workspace::state::mark_active_transition(st, id, now, 620);
+        if !cluster_local {
+            st.record_focus_trail_visit(id);
+            st.model.focus_state.suppress_trail_record_once = true;
+        }
+        st.set_interaction_focus(Some(id), 30_000, now);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compositor::spawn::rules::BuiltinInitialWindowRule;
+    use halley_config::WindowRulePattern;
+    use smithay::reexports::wayland_server::Display;
+
+    #[test]
+    fn visible_overlap_policy_window_blocks_same_monitor_scanout_eligibility() {
+        let mut tuning = halley_config::RuntimeTuning::default();
+        tuning.cluster_default_layout = halley_config::ClusterDefaultLayout::Tiling;
+        let dh = Display::<Halley>::new().expect("display").handle();
+        let mut st = Halley::new_for_test(&dh, tuning);
+
+        let monitor = st.model.monitor_state.current_monitor.clone();
+        let fullscreen = st.model.field.spawn_surface(
+            "fullscreen",
+            Vec2 { x: 400.0, y: 300.0 },
+            Vec2 { x: 800.0, y: 600.0 },
+        );
+        let overlap = st.model.field.spawn_surface(
+            "overlap",
+            Vec2 { x: 400.0, y: 300.0 },
+            Vec2 { x: 240.0, y: 180.0 },
+        );
+        st.assign_node_to_monitor(fullscreen, monitor.as_str());
+        st.assign_node_to_monitor(overlap, monitor.as_str());
+        let _ = st
+            .model
+            .field
+            .set_state(fullscreen, halley_core::field::NodeState::Active);
+        let _ = st
+            .model
+            .field
+            .set_state(overlap, halley_core::field::NodeState::Active);
+        st.model
+            .fullscreen_state
+            .fullscreen_active_node
+            .insert(monitor.clone(), fullscreen);
+
+        assert!(!monitor_has_visible_overlap_policy_window(
+            &st,
+            monitor.as_str()
+        ));
+
+        st.model.spawn_state.applied_window_rules.insert(
+            overlap,
+            AppliedInitialWindowRule {
+                overlap_policy: InitialWindowOverlapPolicy::All,
+                spawn_placement: InitialWindowSpawnPlacement::Adjacent,
+                cluster_participation: InitialWindowClusterParticipation::Float,
+                opacity: 1.0,
+                parent_node: None,
+                suppress_reveal_pan: true,
+                builtin_rule: None,
+            },
+        );
+
+        assert!(monitor_has_visible_overlap_policy_window(
+            &st,
+            monitor.as_str()
+        ));
+    }
+
+    #[test]
+    fn overlap_policy_window_without_monitor_assignment_draws_above_no_outputs() {
+        let mut tuning = halley_config::RuntimeTuning::default();
+        tuning.cluster_default_layout = halley_config::ClusterDefaultLayout::Tiling;
+        let dh = Display::<Halley>::new().expect("display").handle();
+        let mut st = Halley::new_for_test(&dh, tuning);
+
+        let monitor = st.model.monitor_state.current_monitor.clone();
+        let fullscreen = st.model.field.spawn_surface(
+            "fullscreen",
+            Vec2 { x: 400.0, y: 300.0 },
+            Vec2 { x: 800.0, y: 600.0 },
+        );
+        let overlap = st.model.field.spawn_surface(
+            "overlap",
+            Vec2 { x: 790.0, y: 300.0 },
+            Vec2 { x: 240.0, y: 180.0 },
+        );
+        st.assign_node_to_monitor(fullscreen, monitor.as_str());
+        st.model.monitor_state.node_monitor.remove(&overlap);
+        for id in [fullscreen, overlap] {
+            let _ = st
+                .model
+                .field
+                .set_state(id, halley_core::field::NodeState::Active);
+        }
+        st.model
+            .fullscreen_state
+            .fullscreen_active_node
+            .insert(monitor.clone(), fullscreen);
+        st.model.spawn_state.applied_window_rules.insert(
+            overlap,
+            AppliedInitialWindowRule {
+                overlap_policy: InitialWindowOverlapPolicy::All,
+                spawn_placement: InitialWindowSpawnPlacement::Adjacent,
+                cluster_participation: InitialWindowClusterParticipation::Float,
+                opacity: 1.0,
+                parent_node: None,
+                suppress_reveal_pan: true,
+                builtin_rule: None,
+            },
+        );
+
+        assert!(!node_draws_above_fullscreen_on_monitor(
+            &st,
+            overlap,
+            monitor.as_str()
+        ));
+    }
+
+    #[test]
+    fn float_cluster_participation_rule_is_not_persistent_top() {
+        let dh = Display::<Halley>::new().expect("display").handle();
+        let mut st = Halley::new_for_test(&dh, halley_config::RuntimeTuning::default());
+        let id = st.model.field.spawn_surface(
+            "float-rule-window",
+            Vec2 { x: 0.0, y: 0.0 },
+            Vec2 { x: 320.0, y: 240.0 },
+        );
+
+        st.model.spawn_state.applied_window_rules.insert(
+            id,
+            AppliedInitialWindowRule {
+                overlap_policy: InitialWindowOverlapPolicy::None,
+                spawn_placement: InitialWindowSpawnPlacement::Adjacent,
+                cluster_participation: InitialWindowClusterParticipation::Float,
+                opacity: 1.0,
+                parent_node: None,
+                suppress_reveal_pan: true,
+                builtin_rule: None,
+            },
+        );
+
+        assert!(!is_persistent_rule_top(&st, id));
+    }
+
+    #[test]
+    fn picture_in_picture_builtin_rule_is_persistent_top() {
+        let dh = Display::<Halley>::new().expect("display").handle();
+        let mut st = Halley::new_for_test(&dh, halley_config::RuntimeTuning::default());
+        let id = st.model.field.spawn_surface(
+            "pip",
+            Vec2 { x: 0.0, y: 0.0 },
+            Vec2 { x: 320.0, y: 240.0 },
+        );
+
+        st.model.spawn_state.applied_window_rules.insert(
+            id,
+            AppliedInitialWindowRule {
+                overlap_policy: InitialWindowOverlapPolicy::All,
+                spawn_placement: InitialWindowSpawnPlacement::Center,
+                cluster_participation: InitialWindowClusterParticipation::Float,
+                opacity: 1.0,
+                parent_node: None,
+                suppress_reveal_pan: true,
+                builtin_rule: Some(BuiltinInitialWindowRule::PictureInPicture),
+            },
+        );
+
+        assert!(is_persistent_rule_top(&st, id));
+    }
+
+    #[test]
+    fn node_rule_opacity_defaults_to_one() {
+        let dh = Display::<Halley>::new().expect("display").handle();
+        let st = Halley::new_for_test(&dh, halley_config::RuntimeTuning::default());
+        let id = NodeId::new(1);
+
+        assert_eq!(node_rule_opacity(&st, id), 1.0);
+    }
+
+    #[test]
+    fn recompute_node_rule_opacity_updates_existing_node() {
+        let dh = Display::<Halley>::new().expect("display").handle();
+        let mut tuning = halley_config::RuntimeTuning::default();
+        tuning.window_rules = vec![halley_config::WindowRule {
+            app_ids: vec![WindowRulePattern::Exact("kitty".to_string())],
+            titles: Vec::new(),
+            initial_size: None,
+            opacity: Some(0.5),
+            blur: None,
+            overlap_policy: InitialWindowOverlapPolicy::None,
+            spawn_placement: InitialWindowSpawnPlacement::Adjacent,
+            cluster_participation: InitialWindowClusterParticipation::Layout,
+        }];
+        let mut st = Halley::new_for_test(&dh, tuning);
+        let id = st.model.field.spawn_surface(
+            "terminal",
+            Vec2 { x: 0.0, y: 0.0 },
+            Vec2 { x: 320.0, y: 240.0 },
+        );
+        st.model.node_app_ids.insert(id, "kitty".to_string());
+
+        assert!(recompute_node_rule_opacity(&mut st, id));
+        assert_eq!(node_rule_opacity(&st, id), 0.5);
+
+        st.runtime.tuning.window_rules[0].opacity = Some(0.8);
+        assert!(recompute_all_node_rule_opacities(&mut st));
+        assert_eq!(node_rule_opacity(&st, id), 0.8);
+    }
+}

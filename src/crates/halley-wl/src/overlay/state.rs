@@ -1,0 +1,75 @@
+use halley_core::cluster::ClusterId;
+#[derive(Clone, Debug)]
+pub(crate) struct OverlayActionHint {
+    pub(crate) key: String,
+    pub(crate) label: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct OverlayBannerState {
+    pub(crate) title: String,
+    pub(crate) subtitle: Option<String>,
+    pub(crate) actions: Vec<OverlayActionHint>,
+    pub(crate) visible: bool,
+    pub(crate) mix: f32,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct OverlayBannerSnapshot {
+    pub(crate) title: String,
+    pub(crate) subtitle: Option<String>,
+    pub(crate) actions: Vec<OverlayActionHint>,
+    pub(crate) mix: f32,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct OverlayToastState {
+    pub(crate) message: Option<String>,
+    pub(crate) kind: OverlayToastKind,
+    pub(crate) visible_until_ms: u64,
+    pub(crate) duration_ms: u64,
+    pub(crate) hovered: bool,
+    pub(crate) scroll_x: i32,
+    pub(crate) scroll_y: i32,
+    pub(crate) mix: f32,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct OverlayToastSnapshot {
+    pub(crate) message: String,
+    pub(crate) kind: OverlayToastKind,
+    pub(crate) scroll_x: i32,
+    pub(crate) scroll_y: i32,
+    pub(crate) mix: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum OverlayToastKind {
+    #[default]
+    Info,
+    Error,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ExitConfirmOverlayState {
+    pub(crate) visible: bool,
+    pub(crate) mix: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ExitConfirmOverlaySnapshot {
+    pub(crate) mix: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct ClusterBloomAnimState {
+    pub(crate) cluster_id: Option<ClusterId>,
+    pub(crate) visible: bool,
+    pub(crate) mix: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ClusterBloomAnimSnapshot {
+    pub(crate) cluster_id: ClusterId,
+    pub(crate) mix: f32,
+}

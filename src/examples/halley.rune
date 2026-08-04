@@ -1,0 +1,661 @@
+@author "Dustin Pilgrim"
+@description "Spatial Wayland compositor built around infinite workspace navigation"
+
+# Halley is a spatial compositor.
+# Instead of fixed workspaces, each monitor has a navigable field where
+# windows live in space. You move through that space with panning, zooming,
+# clusters, and focus-aware behavior.
+
+# Split configs can be included with `gather`. A gathered file without `as`
+# is merged into this config; explicit values here override gathered defaults.
+#gather "colors.rune"
+
+# Optional environment variables for apps launched by Halley.
+# Uncomment these if you want to prefer Wayland for Qt apps and use qt6ct.
+#env:
+#  QT_QPA_PLATFORM "wayland"
+#  QT_QPA_PLATFORMTHEME "qt6ct"
+#end
+
+# Autostart lets Halley launch bars, notifiers, and background helpers.
+# `once` runs only on compositor startup. `on-reload` runs after a config reload.
+autostart:
+  # Common examples you may want later:
+  #once "waybar"
+  #once "mako"
+  #once "stasis"
+
+  # Example:
+  #on-reload "thunderbird"
+end
+
+# Cursor settings apply to the compositor itself and child apps started by Halley.
+# `hide-when-typing` is useful when you mostly drive the field with the keyboard.
+cursor:
+  theme "Adwaita"
+  size 24
+  hide-when-typing true
+  hide-after-ms 2000
+end
+
+# Keyboard repeat and pointer-driven focus behavior.
+# `focus-mode "click"` preserves the existing click-to-focus behavior.
+input:
+  repeat-rate 30
+  repeat-delay 500
+  focus-mode "click"
+  # Raise clicked windows independently from focus mode. Hover focus does not imply raise.
+  raise-on-click true
+  keyboard:
+    layout "us"
+    variant ""
+    options ""
+    model ""
+  end
+
+  # Pointer gesture and touchscreen protocol passthrough.
+  # Touchpad gestures are forwarded through wp_pointer_gestures_v1;
+  # touchscreen contacts are forwarded through wl_touch.
+  gestures:
+    enabled true
+    client-passthrough true
+    touch-passthrough true
+    pinch-to-zoom true
+    pinch-scope "empty-field"
+    compositor-scope "global"
+    modifier "$mod"
+    scroll-pan "empty-field"
+    swipe-threshold-px 120
+    # 3-finger swipe pans the canvas (continuous, with flick momentum).
+    pan-fingers 3
+    pan-momentum true
+    pan-decay-rate 6
+    flick-min-px-per-s 200
+    # Apogee on 4-finger: up opens, down closes.
+    swipe-up-4 "apogee-open"
+    apogee-swipe-down-4 "apogee-close"
+  end
+
+  # libinput touchpad settings. Any key you omit keeps libinput's own default.
+  #   accel-profile : "adaptive" | "flat"
+  #   scroll-method : "two-finger" | "edge" | "on-button-down" | "no-scroll"
+  #   click-method  : "clickfinger" | "button-areas"
+  touchpad:
+    tap true
+    natural-scroll true
+    dwt true                  # disable while typing
+    accel-speed 0.3           # -1.0 .. 1.0
+    accel-profile "adaptive"
+    scroll-method "two-finger"
+    click-method "clickfinger"
+    tap-button-map "left-right-middle"
+    middle-emulation false
+    left-handed false
+    disabled-on-external-mouse false
+    enabled true              # send-events on/off
+  end
+
+  # libinput mouse / generic-pointer settings.
+  mouse:
+    natural-scroll false
+    accel-speed 0.0
+    accel-profile "flat"
+    middle-emulation false
+    left-handed false
+    enabled true
+  end
+
+  # Per-device overrides. Match the name from `libinput list-devices`
+  # (exact, case-insensitive, or substring). Each block layers on top of the
+  # matching touchpad/mouse section above, field by field.
+  devices:
+    "Logitech MX Master 3":
+      accel-speed 0.6
+      natural-scroll true
+    end
+    "SynPS/2 Synaptics TouchPad":
+      tap false
+    end
+  end
+end
+
+# Default font used for compositor UI like labels and overlays.
+font:
+  family "monospace"
+  size 11
+end
+
+# Where screenshots taken through Halley are saved.
+# Use an absolute path or an env-expanded path like `$env.HOME/...`.
+screenshot:
+  directory "$env.HOME/Pictures/Screenshots/"
+  highlight-color "#d65d26"
+  background-color "auto"
+end
+
+# Background/gesso draws below the field, windows, and layer-shell surfaces.
+# `field-shader` is spatial: it pans and zooms with the Field camera.
+background:
+  mode "field-shader"
+  shader "space"
+  path ""
+  fit "cover"
+  colour "#181a26"
+  accent-colour "#8fa8d8"
+  intensity 1.0
+  animated true
+end
+
+# Debug-only compositor diagnostics.
+debug:
+  overlay-fps false
+  show-ring-when-resizing true
+end
+
+# A viewport represents one monitor/output.
+# On first tty launch Halley writes the detected outputs here for you.
+# If you want to manage monitors manually later, edit this section.
+viewport:
+  DP-1:
+    enabled true
+    
+    offset-x 0
+    offset-y 0
+    
+    width 2560
+    height 1440
+    
+    rate 180.0
+    transform 0
+    vrr "on"
+    # The focus ring is Halley's active zone.
+    # Windows inside it stay more fully active.
+    # Windows outside it may decay into nodes depending on config.
+    focus-ring:
+      primary-rx 820.0
+      primary-ry 420.0
+      offset-x 0
+      offset-y 0
+    end
+  end
+  # Example second monitor configuration.
+  # Uncomment and edit if needed.
+  #DP-2:
+  #  enabled true
+  #  offset-x 0
+  #  offset-y 0
+  #  width 1920
+  #  height 1200
+  #  rate 75.0
+  #  transform 0
+  #  vrr "off"
+  #
+  #  focus-ring:
+  #    primary-rx 820.0
+  #    primary-ry 420.0
+  #    offset-x 0
+  #    offset-y 0
+  #  end
+  #end
+end
+
+# The field is Halley's spatial world for a monitor.
+# Windows live on this field instead of being arranged into fixed desktops.
+field:
+  # Gap in pixels between windows and layout elements.
+  gap 20.0
+  # Maximum number of non-node windows allowed on the Field before decay takes over.
+  # Set to 0 to disable decay entirely.
+  active-windows-allowed 5
+  # Pinned windows/nodes stay locked in place and remain visible in Bearings.
+  pins:
+    corner "top-right"
+    colour "#d65d26"
+    background-colour "auto"
+    size 1.0
+  end
+  close-restore-focus true
+  close-restore-pan "if-offscreen"
+
+  zoom:
+    enabled true
+    step 1.10
+    min 0.35
+    max 1.35
+    smooth true
+    smooth-rate 12.5
+  end
+end
+
+# Placement controls initial window placement and the readable landmark layer.
+# Expanded windows always allow overlap with other expanded windows.
+placement:
+  expanded:
+    # Controls only initial spawn placement. It does not enable/disable overlap.
+    strategy "center"
+    fallback "center"
+    # `find-empty` is best-effort only and ignores expanded windows as blockers.
+    find-empty-mode "best-effort"
+  end
+
+  landmarks:
+    # Nodes, core nodes, and collapsed clusters remain non-overlapping map objects.
+    strategy "nearest-free"
+    normal-blocker "relocate"
+    pinned-blocker "preserve"
+  end
+
+  reveal:
+    enabled true
+    max-pan-px 360
+    animation-ms 180
+    # After placement, reveal the new active window if it would otherwise be awkward/offscreen.
+    pan-to-new "if-needed"
+  end
+end
+
+# A node is Halley's collapsed representation of a window.
+# When a window is no longer active enough to stay expanded,
+# it can decay into a compact node that still exists on the field.
+node:
+  # Keep nodes recognizable without making the field too noisy.
+  show-labels "hover"
+  # `always`, `hover`, or `off` for real app icons. Halley falls back to
+  # the app-id initial when an icon is unavailable or intentionally hidden.
+  show-app-icons "always"
+
+  node-shape "square"
+  node-label-shape "square"
+
+  # Size is a fraction of the node diameter.
+  icon-size 0.72
+
+  # Node body (fill) opacity (0.0–1.0). Lower values let the marker fill
+  # recede into the field; the border ring and app icon stay opaque.
+  opacity 1.0
+
+  # Auto tints the node fill from its border colour.
+  background-colour "auto"
+
+  # Allowed values: "use-window-active", "use-window-inactive",
+  # "use-window-secondary-active", "use-window-secondary-inactive".
+  border-colour-hover "use-window-active"
+  border-colour-inactive "use-window-inactive"
+
+  click-collapsed-outside-focus "activate"
+  click-collapsed-pan "if-offscreen"
+end
+
+# Decay controls how windows transition between active, inactive,
+# and collapsed states.
+# Lower values make Halley condense inactive work more quickly.
+decay:
+  active-delay 240
+  inactive-delay 120
+end
+
+# Trail is Halley's navigation history.
+# Think back/forward through previously focused places or windows.
+trail:
+  history-length 25
+  wrap true
+end
+
+# Bearings are directional indicators for offscreen things.
+# They can show both labels and distance to help you re-orient quickly.
+bearings:
+  show-distance true
+  show-icons true
+  show-pinned true
+  fade-distance 1200
+end
+
+# Clusters are Halley's workspace-like grouping system.
+# Unlike traditional workspaces, clusters live in the field.
+clusters:
+  cluster-dwell-ms 2000
+  distance-px 280.0
+  bloom-direction "clockwise"
+  show-icons true
+  default-layout "stacking"
+end
+
+# Settings for tiled layout inside a cluster.
+tile:
+  new-on-top false
+  gaps-inner 20
+  gaps-outer 20
+  max-stack 4
+  queue-show-icons true
+end
+
+# Settings for stacking layout inside a cluster.
+stacking:
+  max-visible 5
+end
+
+# Halley can use gentle physics-style motion instead of purely rigid snapping.
+physics:
+  enabled true
+  damping 0.45
+end
+
+# Animation controls for window and layout transitions.
+animations:
+  enabled true
+
+  smooth-resize:
+    enabled true
+    duration-ms 90  # lower = tighter, higher = softer
+  end
+
+  maximize:
+    enabled true
+    # Visual-only maximize/unmaximize tween; field geometry stays unchanged.
+    duration-ms 240
+  end
+
+  fullscreen:
+    enabled true
+    # Visual-only window-to-fullscreen tween for browser videos and apps.
+    duration-ms 240
+  end
+
+  window-open:
+    enabled true
+    duration-ms 620
+  end
+
+  window-close:
+    enabled true
+    duration-ms 270
+    style "shrink"
+  end
+
+  tile:
+    enabled true
+    duration-ms 240
+  end
+
+  stack:
+    enabled true
+    duration-ms 220
+  end
+
+  cluster:
+    # Opening/closing a cluster *workspace* (distinct from `tile`/`stack` above,
+    # which animate reflow/cycling *within* an already-open cluster). open slides
+    # members in; close sucks them into the core node. Split per layout.
+    enabled true
+    tiling:
+      open-duration-ms 300   # slide-in cascade
+      stagger-ms 55          # per-member delay (slaves first, master last); 0 = together
+      close-duration-ms 420  # suck-into-core
+    end
+    stacking:
+      open-duration-ms 240   # card grow-in
+      close-duration-ms 360  # suck-into-core
+    end
+  end
+
+  raise:
+    enabled true
+    duration-ms 140
+    scale 1.025
+    shadow-boost 0.18
+    trigger "always"
+  end
+end
+
+# Renderer-level visual effects: backdrop blur and shadows.
+# These sample/composite the world behind a surface, so they live here rather
+# than under `decorations:` (which is compositor chrome attached to surfaces).
+effects:
+  blur:
+    # Master switch. When false, no blur is computed anywhere.
+    enabled false
+
+    # Allow compositor-owned overlays (Lens/Monocle, Aperture, Alt-Tab,
+    # Overview backdrop, popups, labels) to use blur. Each overlay can still
+    # opt out via `overlays.blur`.
+    overlays true
+
+    # Client window blur behaviour:
+    #   "off"    = no global client-window blur (rules may still opt windows in)
+    #   "auto"   = blur only when useful (e.g. a translucent/opacity window)
+    #   "always" = blur eligible windows unless a rule opts them out
+    windows "auto"
+
+    # Layer-shell blur behaviour for bars, launchers, notifications, etc.
+    layer-shell "off"
+
+    # Quality / performance. Dual Kawase is a downsampled multi-pass blur tuned
+    # to look Gaussian-ish without the cost of a true large-kernel Gaussian.
+    method "dual-kawase"
+    radius 24
+    passes 3
+
+    # Frosted-glass polish.
+    saturation 1.10
+    noise 0.012
+  end
+
+  shadows:
+    window:
+      enabled true
+      blur-radius 8
+      spread 0
+      offset-x 0
+      offset-y 5
+      colour "#05030530"
+    end
+
+    node:
+      enabled true
+      blur-radius 14
+      spread 0
+      offset-x 0
+      offset-y 3
+      colour "#05030524"
+    end
+
+    overlay:
+      enabled true
+      blur-radius 24
+      spread 1
+      offset-x 0
+      offset-y 7
+      colour "#05030538"
+    end
+  end
+end
+
+# Compositor-owned window borders managed by Halley.
+decorations:
+  border:
+    size 3
+    radius 0
+    colour-focused "#d65d26"
+    colour-unfocused "#333333"
+  end
+
+  secondary-border:
+    enabled false
+    size 1
+    gap 2
+    colour-focused "#fabd2f"
+    colour-unfocused "#1f1f1f"
+  end
+
+  resize-using-border true
+end
+
+# Styling for compositor-drawn overlays like labels and helper UI.
+overlays:
+  background-colour "auto"
+  text-colour "auto"
+  shape "square"
+  borders "true"
+  border-source "primary"
+
+  # Opt overlays into the global blur system (requires effects.blur.overlays).
+  blur true
+end
+
+# Main input bindings.
+# Some bindings are context-sensitive. The same key may do different things
+# in the field versus inside a tile or stacking layout.
+keybinds:
+  mod "super"
+
+  # Basic compositor controls.
+  "$var.mod+shift+r" "reload"
+  "$var.mod+n" "toggle-state"
+  "$var.mod+m" "maximize-focused"
+  "$var.mod+f" "toggle-fullscreen"
+  "$var.mod+p" "toggle-focused-pin"
+  "$var.mod+q" "close-focused"
+
+  # Zoom controls for the field camera.
+  "$var.mod+mousewheelup" "zoom-in"
+  "$var.mod+mousewheeldown" "zoom-out"
+  "$var.mod+middlemouse" "zoom-reset"
+
+  "$var.mod+shift+e" "quit"
+
+  # Move the selected/latest node in the field.
+  "$var.mod+left" "node-move left"
+  "$var.mod+right" "node-move right"
+  "$var.mod+up" "node-move up"
+  "$var.mod+down" "node-move down"
+
+  # Pan the camera back to centre on the last focused node (quick "go back").
+  "$var.mod+h" "center-last-focused"
+
+  # Switch active monitor focus.
+  "$var.mod+shift+left" "monitor-focus left"
+  "$var.mod+shift+right" "monitor-focus right"
+  "$var.mod+shift+up" "monitor-focus up"
+  "$var.mod+shift+down" "monitor-focus down"
+
+  # Cluster controls.
+  "$var.mod+shift+c" "cluster-mode"
+  "$var.mod+l" "cluster-layout cycle"
+  "$var.mod+1" "cluster slot 1"
+  "$var.mod+2" "cluster slot 2"
+  "$var.mod+3" "cluster slot 3"
+  "$var.mod+4" "cluster slot 4"
+  "$var.mod+5" "cluster slot 5"
+  "$var.mod+6" "cluster slot 6"
+  "$var.mod+7" "cluster slot 7"
+  "$var.mod+8" "cluster slot 8"
+  "$var.mod+9" "cluster slot 9"
+  "$var.mod+0" "cluster slot 10"
+
+  # Bearings controls.
+  "$var.mod+z" "bearings-show"
+  "$var.mod+shift+z" "bearings-toggle"
+
+  # Trail navigation.
+  "$var.mod+," "trail-prev"
+  "$var.mod+." "trail-next"
+
+  # Focus cycling.
+  "alt+tab" "cycle-focus"
+  "alt+shift+tab" "cycle-focus-backward"
+
+  # Applications.
+  # `open-terminal` picks the first supported Wayland terminal in PATH.
+  "$var.mod+return" "open-terminal"
+  "$var.mod+d" "fuzzel"
+
+  # Mouse actions.
+  "$var.mod+leftmouse" "move-window"
+  "$var.mod+rightmouse" "resize-window"
+  "$var.mod+shift+leftmouse" "pan-field"
+
+  # Tile layout controls.
+  "$var.mod+left" "tile-focus left"
+  "$var.mod+right" "tile-focus right"
+  "$var.mod+up" "tile-focus up"
+  "$var.mod+down" "tile-focus down"
+
+  "$var.mod+ctrl+left" "tile-swap left"
+  "$var.mod+ctrl+right" "tile-swap right"
+  "$var.mod+ctrl+up" "tile-swap up"
+  "$var.mod+ctrl+down" "tile-swap down"
+
+  # Stacking layout controls.
+  "$var.mod+left" "stack-cycle forward"
+  "$var.mod+right" "stack-cycle backward"
+
+  # Screenshot UI
+  "$var.mod+shift+s" "halleyctl capture menu"
+
+  # Media keys.
+  "XF86AudioRaiseVolume" "wpctl set-volume -l 1 @default_audio_sink@ 5%+"
+  "XF86AudioLowerVolume" "wpctl set-volume @default_audio_sink@ 5%-"
+  "XF86AudioMute" "wpctl set-mute @default_audio_sink@ toggle"
+end
+
+# Rules let you special-case certain windows/apps.
+# This example keeps common Firefox file dialogs centered and floating.
+rules:
+  rule:
+    app-id "firefox"
+    title [r"File Upload.*", r"Open File.*", r"Save File.*", r"Choose.*"]
+    # Optional fixed initial size for matching windows.
+    #width 720
+    #height 520
+    spawn-placement "center"
+    cluster-participation "float"
+  end
+
+  # Frosted-glass terminal: make it translucent and opt it into blur.
+  rule:
+    app-id "Alacritty"
+    opacity 0.86
+    blur true
+  end
+
+  # Never blur video/presentation surfaces (rule-level `blur false` always wins).
+  rule:
+    app-id "mpv"
+    blur false
+  end
+end
+
+debug:
+  overlay-fps false
+  show-ring-when-resizing true
+end
+
+# Gamescope integration. Put `halleyctl gamescope run -- %command%` in a game's
+# Steam launch options; matching games launch in a nested gamescope session
+# sized to the selected monitor. The `gamescope` binary is an optional runtime
+# dependency; missing it just launches the game unwrapped.
+gamescope:
+  enabled true
+  # "focused", "cursor", "primary", or a connector name.
+  monitor "focused"
+  # "auto" resolves from the selected monitor; or set explicit pixel values.
+  output-width "auto"
+  output-height "auto"
+  game-width "auto"
+  game-height "auto"
+  refresh "auto"
+  # Fullscreen wins if both fullscreen and borderless are true.
+  fullscreen true
+  borderless false
+  suppress-overlays true
+  passthrough-pointer-lock true
+  bypass-spatial-camera true
+
+  # Per-game profiles match by `app-id` and inherit the globals above.
+  # Set `enabled false` to opt a game out of wrapping.
+  #game:
+  #  name "Deep Rock Galactic"
+  #  app-id "steam_app_548430"
+  #  enabled true
+  #end
+end
