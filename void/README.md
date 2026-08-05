@@ -59,10 +59,12 @@ Pulled in automatically via `depends=`:
 
 - `archs="x86_64*"`: the fork has only been tested on glibc x86_64. musl
   should work in principle (Halley is pure Rust) but is untested.
-- If xbps-src complains about the `checksum` in the template, run
-  `curl -sL https://github.com/mikuri12/halley/archive/refs/heads/main.tar.gz | sha256sum`
-  and replace the `GENERATED_BY_XBPS_SRC` placeholder.
-- To pin a build to a specific release, replace the `distfiles` URL with
-  the tarball of a tag (e.g.
+- The `checksum` in the template is the SHA256 of the
+  `https://github.com/mikuri12/halley/archive/refs/heads/main.tar.gz`
+  tarball. It changes every time you push a new commit to `main`, so if you
+  re-pin to a new HEAD, recompute it with
+  `curl -sL https://github.com/mikuri12/halley/archive/refs/heads/main.tar.gz | sha256sum`.
+- To pin the template to a specific release, replace the `distfiles` URL
+  with the tarball of a tag (e.g.
   `https://github.com/mikuri12/halley/archive/refs/tags/v0.5.0-mikuri.1.tar.gz`)
-  and update `checksum`.
+  and recompute `checksum` the same way.

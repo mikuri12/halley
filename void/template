@@ -41,7 +41,7 @@ homepage="https://github.com/mikuri12/halley"
 distfiles="https://github.com/mikuri12/halley/archive/refs/heads/main.tar.gz"
 # Replace with the actual sha256 of the tarball if xbps-src complains,
 # computed with: curl -sL https://github.com/mikuri12/halley/archive/refs/heads/main.tar.gz | sha256sum
-checksum="GENERATED_BY_XBPS_SRC"
+checksum="d0302f9fa85456077268e7d2e59e9a9fab00364cb69f928f64dcb476d1b8a98d"
 
 # xbps-src unpacks the tarball into ${wrksrc}/. The tarball contains the
 # repo root (README, src/, void/, nix/, ...), so the cargo workspace lives at
