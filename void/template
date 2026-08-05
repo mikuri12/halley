@@ -34,14 +34,12 @@ maintainer="mikuri12 <https://github.com/mikuri12>"
 license="GPL-3.0-only"
 homepage="https://github.com/mikuri12/halley"
 
-# Tarball of the Mikuri fork HEAD on the main branch.
-# To pin to a specific release, replace with:
-#   https://github.com/mikuri12/halley/archive/refs/tags/v0.5.0-mikuri.1.tar.gz
-# and update `checksum` accordingly.
-distfiles="https://github.com/mikuri12/halley/archive/refs/heads/main.tar.gz"
-# Replace with the actual sha256 of the tarball if xbps-src complains,
-# computed with: curl -sL https://github.com/mikuri12/halley/archive/refs/heads/main.tar.gz | sha256sum
-checksum="d0302f9fa85456077268e7d2e59e9a9fab00364cb69f928f64dcb476d1b8a98d"
+# Pinned release tarball of the Mikuri fork. Stable: the tag is immutable,
+# so this checksum won't drift when new commits land on main.
+distfiles="https://github.com/mikuri12/halley/archive/refs/tags/v0.5.0-mikuri.1.tar.gz"
+checksum="3ea90a8025f661525ace105d046f8553a33aa7814cb36380e0295652ddd5b3bd"
+# To re-pin to a future release, replace the URL with the next tag and
+# recompute: curl -sL <url> | sha256sum
 
 # xbps-src unpacks the tarball into ${wrksrc}/. The tarball contains the
 # repo root (README, src/, void/, nix/, ...), so the cargo workspace lives at

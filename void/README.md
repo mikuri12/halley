@@ -59,12 +59,8 @@ Pulled in automatically via `depends=`:
 
 - `archs="x86_64*"`: the fork has only been tested on glibc x86_64. musl
   should work in principle (Halley is pure Rust) but is untested.
-- The `checksum` in the template is the SHA256 of the
-  `https://github.com/mikuri12/halley/archive/refs/heads/main.tar.gz`
-  tarball. It changes every time you push a new commit to `main`, so if you
-  re-pin to a new HEAD, recompute it with
-  `curl -sL https://github.com/mikuri12/halley/archive/refs/heads/main.tar.gz | sha256sum`.
-- To pin the template to a specific release, replace the `distfiles` URL
-  with the tarball of a tag (e.g.
-  `https://github.com/mikuri12/halley/archive/refs/tags/v0.5.0-mikuri.1.tar.gz`)
-  and recompute `checksum` the same way.
+- The `checksum` in the template is the SHA256 of the pinned release
+  tarball `refs/tags/v0.5.0-mikuri.1.tar.gz`. Pinning to a tag (not to
+  `refs/heads/main`) keeps the checksum stable across future commits.
+- To re-pin to a new release, push the new tag and recompute:
+  `curl -sL https://github.com/mikuri12/halley/archive/refs/tags/<newtag>.tar.gz | sha256sum`.
