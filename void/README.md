@@ -1,11 +1,8 @@
 # Building the Void Linux package
 
-The xbps-src `template` lives in this folder. The wrapper `halley-session`
-ships the workaround for the "no signal" bug on Void: the upstream one
-assumes systemd-logind's session D-Bus, which doesn't exist under runit.
-When `DBUS_SESSION_BUS_ADDRESS` is unset, this wrapper re-execs itself
-under `dbus-run-session` so Halley actually gets a session bus and doesn't
-hang in `dbus-update-activation-environment` -> `do_wait`.
+The xbps-src `template` here builds the compositor as a normal Void
+package, downloading the source directly from this fork on GitHub via
+`distfiles`. You don't copy any local files besides the template itself.
 
 ## How to build & install
 
@@ -13,12 +10,9 @@ hang in `dbus-update-activation-environment` -> `do_wait`.
 git clone https://github.com/void-linux/void-packages.git
 cd void-packages
 
+# Drop only the template (everything else is fetched by xbps-src):
 mkdir -p srcpkgs/halley
-cp ../void/template            srcpkgs/halley/template
-cp ../void/halley-session      srcpkgs/halley/
-cp ../void/halley.desktop      srcpkgs/halley/
-cp ../void/halley.portal       srcpkgs/halley/
-cp ../void/halley-portals.conf srcpkgs/halley/
+curl -L -o srcpkgs/halley/template https://raw.githubusercontent.com/mikuri12/halley/main/void/template
 
 ./xbps-src pkg halley
 sudo xbps-install --repository hostdir/binpkgs halley
@@ -26,14 +20,49 @@ sudo xbps-install --repository hostdir/binpkgs halley
 
 After install, log out and pick **Halley** from the Noctalia/ly/SDDM menu.
 The `.desktop` points to `/usr/bin/halley-session`, which already carries
-the `dbus-run-session` fix for Void runit (no session D-Bus by default).
+the `dbus-run-session` guard for Void runit (no session D-Bus by default).
+
+## What the package installs
+
+All of this comes from the build, no manual steps:
+
+- `/usr/bin/halley`, `/usr/bin/halleyctl`, `/usr/bin/xdg-desktop-portal-halley`
+- `/usr/bin/halley-session` — the wrapper with the `dbus-run-session` guard
+- `/usr/share/wayland-sessions/halley.desktop`
+- `/usr/share/xdg-desktop-portal/portals/halley.portal`
+- `/usr/share/xdg-desktop-portal/halley-portals.conf`
+- `/usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.halley.service`
+
+The portal backend is registered through the metadata + D-Bus service; no
+`/etc/xdg-desktop-portal/portals.conf` is touched by the package.
+
+## Build-time dependencies
+
+The template pulls `pkg-config`, `rust`, `cargo`, `clang18-devel`,
+`libclang18`, `wayland-devel`, `libxkbcommon-devel`, `libinput-devel`,
+`libseat-devel`, `libudev-devel`, `libgbm-devel`, `libdrm-devel`,
+`libglvnd-devel`, `pixman-devel`, `dbus-devel`, `pipewire-devel`.
+
+`clang18-devel` + `libclang18` are needed because `input-sys` and `libseat`
+generate bindings via `bindgen`.
+
+## Runtime dependencies
+
+Pulled in automatically via `depends=`:
+
+- `xwayland-satellite` — Halley launches it by name for X11 app support.
+- `dbus` — provides `dbus-run-session`, used by the `halley-session` guard.
+- `seatd` — libseat backend for DRM VT handover. Make sure your user is
+  in the `_seatd` group (or that the `seatd` runit service is enabled).
 
 ## Notes
 
 - `archs="x86_64*"`: the fork has only been tested on glibc x86_64. musl
   should work in principle (Halley is pure Rust) but is untested.
-- `depends`: `xwayland-satellite` (X11 app support), `dbus` (provides
-  `dbus-run-session`, used by the `halley-session` guard), `seatd`
-  (libseat backend for DRM vt handover).
-- `clang18-devel` + `libclang18` are needed because `input-sys` and
-  `libseat` generate bindings via `bindgen` at build time.
+- If xbps-src complains about the `checksum` in the template, run
+  `curl -sL https://github.com/mikuri12/halley/archive/refs/heads/main.tar.gz | sha256sum`
+  and replace the `GENERATED_BY_XBPS_SRC` placeholder.
+- To pin a build to a specific release, replace the `distfiles` URL with
+  the tarball of a tag (e.g.
+  `https://github.com/mikuri12/halley/archive/refs/tags/v0.5.0-mikuri.1.tar.gz`)
+  and update `checksum`.

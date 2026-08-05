@@ -1,299 +1,187 @@
-# Halley — Mikuri build
+<h1 align="center">Halley</h1>
 
-This is a patched, source-only checkout of the
-[Halley](https://github.com/saltnpepper97/halley) Wayland compositor (upstream
-tag `v0.5.0`) with a set of local fixes applied on top.
+<p align="center"><em>Named after Halley's comet — periodic, precise, returning.</em></p>
 
-The goal of this folder is to let **anyone** clone it, read the patches, and
-build the compositor with `cargo` — no Nix, no per-machine hacks. The code is
-already patched in [`src/`](./src/); the raw patches also live under
-[`patches/`](./patches/) for reference / rebasing onto a newer upstream.
+<p align="center">
+  <a href="https://saltnpepper97.github.io/halley-site/"><strong>Website</strong></a>
+</p>
 
-## Layout
+[![Sponsor](https://img.shields.io/badge/%E2%9D%A4-Support_Halley-ff69b4?style=for-the-badge)](#support-the-next-leap)
+![License](https://img.shields.io/badge/license-GPL--3.0--only-blueviolet?style=for-the-badge)
+![Status](https://img.shields.io/badge/status-active-brightgreen?style=for-the-badge)
+![Wayland](https://img.shields.io/badge/display-Wayland-blue?style=for-the-badge)
+![Build](https://img.shields.io/badge/build-passing-success?style=for-the-badge)
+![Rust](https://img.shields.io/badge/language-Rust-orange?style=for-the-badge)
 
-```
-halleymikuri/
-├── src/                 # upstream v0.5.0 with the fixes already applied
-│   ├── crates/          #   Cargo workspace (halley-wl is the main crate)
-│   ├── packaging/       #   wayland-sessions .desktop, systemd-user units,
-│   │                    #   xdg-desktop-portal config, dbus services
-│   └── Cargo.toml       #   workspace manifest
-├── patches/
-│   ├── halley-fixes.patch                       # the canonical patch (already applied to src/)
-│   ├── halley-fixes.patch.bak-previo-cursor     # earlier revision (before the cursor fix)
-│   └── halley-fixes.patch.bak-previo-idle-cpu   # earlier revision (before the idle/cpu fix)
-├── void/                # xbps-src template + assets for the Void Linux package
-│   ├── template         #   xbps-src template (cargo build, installs bin + .desktop + portal)
-│   ├── halley-session   #   wrapper with the dbus-run-session guard for runit/no-systemd
-│   ├── halley.desktop   #   Wayland-sessions .desktop pointing at /usr/bin/halley-session
-│   ├── halley.portal    #   xdg-desktop-portal backend metadata
-│   ├── halley-portals.conf  # portal routing (ScreenCast/Screenshot -> halley backend)
-│   └── README.md        #   build & install instructions for Void
-└── nix/                 # Nix flake exposing the package + a HM configuration
-    ├── flake.nix        #   packages.halley + homeConfigurations.mikuri
-    └── halley.nix       #   Rust derivation (callPackage-able)
-```
+---
 
-> The two `.bak-previo-*` files are kept for archaeological reasons. To rebuild
-> `src/` from the upstream tag you only need `halley-fixes.patch`. If you ever
-> rebase onto a newer upstream, apply that patch and resolve the conflicts; the
-> `.bak` files are not part of that flow.
+> **Windows as nodes. Windows as clusters. Windows as your command center.**
 
-## What the patch fixes
+Halley is a Wayland compositor built from the ground up for multi-monitor setups. Each display gets its own independent infinite canvas. Windows live as nodes on those canvases, group into clusters you build intentionally, and decay gracefully when they drift out of focus. Inspired by the comet it's named after — periodic, precise, and always returning — Halley makes multi-monitor work feel deliberate rather than chaotic.
 
-`halley-fixes.patch` bundles six independent fixes, each explained in a comment
-at the hunk it touches. Summary:
+---
 
-### 1. Direct-scanout no longer disabled by pending frame-callbacks
-`crates/halley-wl/src/backend/tty/drm.rs`
+## Support the Next Leap
 
-A fullscreen client **always** has pending frame-callbacks, so the old gate
-that turned off direct-scanout whenever callbacks were pending made the scanout
-path oscillate to the composited (GL) path on every frame. Result: flicker and
-a noticeable fps drop in fullscreen games. The patch drops the
-`fullscreen_needs_paced_frames` gate: the direct-scanout path is already paced
-by page-flip + presentation feedback further down, so the gate was redundant
-and harmful.
+Halley will continue receiving updates, fixes, protocol work, and polish. The project is active, and the core direction is not being paused or held hostage.
 
-### 2. Fullscreen apps cover the Top/Overlay layer-shell surfaces
-`crates/halley-wl/src/compositor/fullscreen/system.rs`,
-`crates/halley-wl/src/render/frame/draw.rs`,
-`crates/halley-wl/src/render/frame/scene.rs`,
-`crates/halley-wl/src/input/pointer/focus/surface.rs`
+The larger leap is different. A full Wayland desktop ecosystem can only be taken so far as a solo project. Sponsorship helps fund the boring-but-important work that makes Halley more durable, approachable, and useful over time — documentation, testing, packaging, compatibility, triage, tooling, and release work — alongside larger technical improvements.
 
-Halley has no dedicated fullscreen render route, so the Top/Overlay
-layer-shell surfaces (bar, notifications, launcher) were drawn **after** the
-window stack and always sat on top of a fullscreen app. The patch:
+Sponsorship does **not** buy roadmap control. Halley remains maintainer-directed. Support helps create the time and stability needed to execute on that direction responsibly.
 
-- Adds `current_monitor_has_settled_fullscreen(st, now)` — true when the
-  current render monitor has a fullscreen node whose enter/exit animation is
-  idle. Gating on "animation idle" means the bar re-appears while the
-  fullscreen zooms **out** on exit, instead of popping back only at the end.
-- Adds a `suppress_top_overlay_layers` flag to `SceneCollections` that the
-  frame builder consults to skip drawing `layer_top_elements` and
-  `layer_overlay_elements`.
-- Makes the **hit-test** use the same predicate, otherwise the layers stayed
-  invisible but clickable: a click "inside" the fullscreen app was swallowed
-  by a layer the user couldn't see.
-- Reverses the layer-shell placement list before the stable layer sort, so a
-  fullscreen surface mapped *before* a same-layer panel (e.g. a panel's own
-  click-shield) doesn't win the hit-test over the panel above it.
+### Sponsorship Stretch Goals
 
-### 3. `send_pending_configure()` instead of unconditional `send_configure()`
-`crates/halley-wl/src/compositor/fullscreen/system.rs`
+- A real Halley website, beyond a basic GitHub Pages presence.
+- A major Rune-CFG upgrade so it can become a larger foundation for future Halley UI and app work, not only a config language.
+- A much stronger `halley-api` for plugins, integrations, ecosystem tooling, and external developers.
+- A system for creating full Halley ecosystem apps using Rune-CFG plus light Rust, mostly through `halley-api`.
+- Documentation, onboarding, examples, migration notes, troubleshooting, and developer guides.
+- Packaging, testing, CI, compatibility, hardware/device testing, crash/debug tooling, and other infrastructure work.
+- Funding or compensating a community maintainer for triage, Discord/community support, docs cleanup, bug reproduction, and release coordination.
+- Better outreach: demos, release posts, videos, dev logs, showcases, and broader Linux desktop visibility.
 
-A client already in fullscreen that re-requests `set_fullscreen`
-(Chromium/Electron do this on tab/video switches) used to receive an
-**identical** configure event with Fullscreen reasserted. The browser read
-that as "you just entered fullscreen" and re-shewed the enter-fullscreen toast,
-which then never dismissed. `send_pending_configure()` is Smithay's own dedup
-— a no-op when the pending state equals the already-sent one. Same pattern
-upstream already uses in `compositor/overlap/system/resolve.rs`.
+---
 
-### 4. Animated XCursor support (multi-frame)
-`crates/halley-wl/src/render/cursor_theme.rs`,
-`crates/halley-wl/src/render/cursor.rs`,
-`crates/halley-wl/src/render/frame/draw.rs`,
-`crates/halley-wl/src/frame_loop/activity.rs`,
-`crates/halley-wl/src/portal/mod.rs`
+## Demo
 
-Upstream only kept the **first** XCursor frame, so every animated cursor
-theme was static. The patch:
+![Halley demo](demo/demo.png)
+![Halley demo](demo/demo-1.png)
 
-- Adds a `FrameData { pixels_bgra, delay_ms }` struct and replaces the single
-  `pixels_bgra` field of `SoftwareCursorSprite` with `frames: Vec<FrameData>`.
-- `SoftwareCursorSprite::frame_at(elapsed_ms)` picks the right frame by
-  walking the cumulative delays (single-frame sprites short-circuit).
-- `CursorManager` now tracks an animation `started_at` + `cycle_ms` and
-  resets them only when the named icon **actually changes** (not every render
-  frame).
-- Forces an output redraw while an animated named cursor is active, so the
-  blit advances frames by elapsed time without needing a dedicated timer.
-- The screencast portal takes a static first-frame snapshot for its cursor
-  metadata — the client gets a fixed image, as before.
+---
 
-### 5. Adaptive idle tick + display-fd in calloop
-`crates/halley-wl/src/backend/tty/mod.rs`
+## Concepts
 
-At 60 Hz the master calloop timer was the heartbeat that drove the whole
-compositor, so it re-armed on every iteration and the process never went idle.
-The patch:
+A quick orientation before diving in.
 
-- Adds an `IDLE_TICK_MS = 100` const and a `busy` predicate; when nothing
-  pending needs a fast tick (no redraws queued, no spawned children, no
-  pending frame callbacks, no DPMS-pending frames, no config watch, no
-  active animation, not in the first 6 s of boot) the timer is re-armed to
-  the slow `IDLE_TICK_MS` instead of `frame_interval`.
-- Registers the **display fd** itself in calloop (`Interest::READ`,
-  `Mode::Level`) so a client commit wakes the loop on its own. Without this,
-  the only thing that serviced clients was the 16.7 ms timer, which is exactly
-  what kept the compositor polling permanently at idle.
+| Term | What it is |
+|---|---|
+| **Field** | An infinite 2D canvas, one per monitor. Everything lives here. Zoomable and pannable. |
+| **Node** | A window on the Field — open, collapsed, or a cluster core. |
+| **Focus Ring** | An invisible eye-shaped region defining your active area. Windows outside it are candidates for decay. |
+| **Decay** | Nodes that drift outside the focus ring dim or collapse over time. Optional and configurable. |
+| **Cluster** | Halley's answer to workspaces — a contained layout you build intentionally from a set of windows. |
+| **Core** | The collapsed form of a cluster on the Field. Expands into a petal arrangement of window previews. |
+| **Trail** | History-aware navigation — step backward and forward through recent focus changes. |
+| **Bearings** | A lightweight directional overlay for orienting movement and navigation around the current view. |
+| **Jump** | Move a grabbed window across monitors, traversing between Fields, with a single keybind. |
 
-### 6. CursorManager carried into the direct-scanout cursor path
-`crates/halley-wl/src/backend/tty/drm.rs`, `render/cursor.rs`
+---
 
-Side-effect of fix #4: the direct-scanout cursor path used to read the global
-cache directly, bypassing the animation state. The patch threads a
-`&mut CursorManager` down through `queue_tty_drm_frame` →
-`render_tty_direct_elements` → `direct_scanout_cursor_elements` so the sprite
-is resolved via `cursor_manager.sprite_with_fallback(...)`, which keeps the
-`started_at`/`cycle_ms` authoritative also when the cursor goes out via the
-DRM HW plane (where `draw_cursor_layer` does not run).
+## The Field
 
-## Build from source
+Multi-monitor is a first-class concept in Halley — not an afterthought. Each monitor gets its own infinite canvas, completely independent from every other display. The Field is zoomable, pannable, and isolated per monitor.
 
-### Native toolchain
+- **Per-monitor** — displays don't share state; each Field is its own world
+- **Max windows** — configurable cap on open nodes per Field
+- **Decay** — opt-in clutter management based on focus ring position; a small overlap tolerance prevents edge-case false positives
+- **Jump** — grab a window and send it to another monitor's Field with one keybind; `Super+Shift+LeftMouse` for a pointer-driven field jump
 
-You need a reasonably recent Rust (stable is fine; the workspace builds with
-`resolver = "2"`). You also need `pkg-config` and the C libraries that
-smithay links against. On a Debian/Ubuntu-ish system that's roughly:
+The **Focus Ring** is the heart of the Field. It's an invisible eye-shaped region centered on your view — windows that fall significantly outside it over time become candidates for decay. You can make it briefly visible via config; it fades out after a moment. Size and shape are fully configurable.
 
-```sh
-sudo apt install pkg-config build-essential \
-                 libwayland-dev libxkbcommon-dev libinput-dev libseat-dev \
-                 libudev-dev libgbm-dev libdrm-dev libglvnd-dev \
-                 libpixman-1-dev libdbus-1-dev libpipewire-0.3-dev
-```
+---
 
-On Void Linux (what this config actually targets):
+## Clusters
 
-```sh
-sudo xbps-install -S pkg-config clang-devel wayland-devel libxkbcommon-devel \
-                   libinput-devel libseat-devel libudev-devel libgbm-devel \
-                   libdrm-devel libglvnd-devel pixman-devel dbus-devel \
-                   pipewire-devel
-```
+Clusters are Halley's answer to workspaces — but you build them yourself, intentionally, rather than having them auto-generated.
 
-> `input-sys` and `libseat` generate bindings with `bindgen`, so `libclang`
-> is needed at build time (the `clang-devel` / `libclang-dev` package).
+### Building a cluster
 
-Then:
+Enter cluster mode, then click or mark the windows you want to group. Press `Enter` to form the cluster, or `Esc` to cancel and return to the Field. Once formed, the cluster collapses into a **core node** on the Field — a single handle representing the whole group.
 
-```sh
-cd src
-cargo build --release
-# Binaries land in:
-#   target/release/halley
-#   target/release/halleyctl
-#   target/release/xdg-desktop-portal-halley
-```
+### The core
 
-Tests are gated behind a live Wayland display and system fonts (they panic
-with `NoWaylandLib` / "no default font found") and cannot run in a sandbox,
-so the Nix derivation sets `doCheck = false`. You can run them manually on a
-real session with `cargo test` if you want.
+Clicking a core within the focus ring **enters** the cluster. Expanding it fans the windows out in a **petal arrangement** — clockwise or counter-clockwise — as icon-sized previews around the core. From there you can:
 
-### EGL / wayland-client runtime resolution
+- Pull windows out into the Field
+- Bring Field windows in
+- Collapse it back into the core
 
-smithay loads `libEGL` (via libglvnd) and `libwayland-client` through
-`dlopen()`. On the Nix derivation these are forced in as `DT_NEEDED` via link
-args so the compositor finds them without an `LD_LIBRARY_PATH`. If you build
-natively against the system pkg-config, the system loader already resolves
-them from the default search path and you don't need to do anything.
+### Inside a cluster
 
-If your distro doesn't ship a default search path that covers them (rare),
-set `LD_LIBRARY_PATH` to point at the directories that contain `libEGL.so`
-and `libwayland-client.so` before launching. **Do not** bake that env into
-the `halley` binary if you can avoid it — Halley is the compositor, so
-everything it launches (terminal, games, browsers) inherits its environment,
-and a stray `LD_LIBRARY_PATH` will mix libraries across distros and break GLX.
+Once inside, you leave the Field entirely. The cluster is its own contained space with one of two layout modes:
 
-### X11 apps
+**Tiling** — Weighted tiling. Windows are arranged by assigned weight and recency.
 
-Halley launches [xwayland-satellite](https://github.com/Supreeeme/xwayland-satellite)
-by name (`Command::new("xwayland-satellite)`) for X11 app support. Make sure
-that binary is on `PATH` when you start Halley.
+**Stacking** — Windows layered in a navigable stack, similar to a mobile app switcher. Navigate with keybinds, reorder the stack as needed.
 
-### Installing the session
+---
 
-The `packaging/` folder in `src/` already contains everything you need. The
-upstream `halley-session` script hardcodes `/usr/bin/halley` and assumes a
-session D-Bus. The Nix derivation in the parent repo rewrites both; for a
-native install you either patch them yourself after install, or start
-`halley` directly from your display manager's exec line.
+## Systems
 
-Typical install into `/usr/local`:
+| System | Description |
+|---|---|
+| **Field** | Per-monitor infinite canvases with zoom and pan |
+| **Clusters** | Core nodes, cluster entry/exit, tiling, stacking, drag reordering |
+| **Focus Ring** | Configurable active region with optional preview |
+| **Decay** | Optional clutter reduction outside the focus ring |
+| **Trail** | Recent-focus navigation — back and forward |
+| **Bearings** | Directional overlays and navigation cues |
+| **Jump / Field Jump** | Fast cross-monitor grabbed-window movement |
+| **IPC** | Unix socket control at `$XDG_RUNTIME_DIR/halley/halley.sock` |
+| **Xwayland** | On-demand support via `xwayland-satellite` |
 
-```sh
-sudo install -Dm755 target/release/halley             /usr/local/bin/halley
-sudo install -Dm755 target/release/halleyctl         /usr/local/bin/halleyctl
-sudo install -Dm755 target/release/xdg-desktop-portal-halley \
-        /usr/local/bin/xdg-desktop-portal-halley
-sudo install -Dm755 src/packaging/wayland-sessions/halley-session \
-        /usr/local/bin/halley-session
-sudo install -Dm644 src/packaging/wayland-sessions/halley.desktop \
-        /usr/local/share/wayland-sessions/halley.desktop
-sudo install -Dm644 src/packaging/xdg-desktop-portal/portals/halley.portal \
-        /usr/local/share/xdg-desktop-portal/portals/halley.portal
-sudo install -Dm644 src/packaging/xdg-desktop-portal/halley-portals.conf \
-        /usr/local/share/xdg-desktop-portal/halley-portals.conf
-sudo install -Dm644 src/packaging/dbus-1/services/org.freedesktop.impl.portal.desktop.halley.service \
-        /usr/local/share/dbus-1/services/org.freedesktop.impl.portal.desktop.halley.service
-```
+---
 
-After that you'll probably want to edit
-`/usr/local/share/wayland-sessions/halley.desktop` to point at
-`/usr/local/bin/halley-session`, and `/usr/local/bin/halley-session` to
-`/usr/local/bin/halley`, so the paths match your prefix.
+## Requirements
 
-## Install on Void Linux (xbps package)
+Halley targets a native Linux Wayland session and expects:
 
-This repo ships an `xbps-src` template under [`void/`](./void/) that builds
-the compositor as a normal Void package and installs the patched
-`halley-session` wrapper (with the `dbus-run-session` fix for the "no
-signal" bug under runit — see `void/halley-session` for the rationale).
+- A DRM/KMS-capable graphics stack with GBM/EGL/OpenGL support
+- A seat/session backend through `libseat` such as `seatd` or logind
+- `libinput` and `udev` access on a real TTY for the native backend
+- Rust and Cargo if you are building from source
 
-### Build & install
+Optional but commonly needed:
+
+- `xwayland-satellite` for X11 app support
+- Halley's native `xdg-desktop-portal-halley` backend for portal-driven screen/window sharing, plus `xdg-desktop-portal-gtk` for common file/dialog portals
+- `fuzzel` plus a Wayland terminal such as `ghostty`, `kitty`, `foot`, `wezterm`, `alacritty`, `rio`, or `contour` if you use the default launch bindings
+
+---
+
+## Install
+
+### Void Linux (xbps package — this fork)
+
+This fork ships an `xbps-src` template that builds the compositor as a real Void
+package. Anyone can build it on Void with no local files to copy.
 
 ```sh
 git clone https://github.com/void-linux/void-packages.git
 cd void-packages
 
+# Drop only the template into srcpkgs/halley. The template itself
+# downloads the source via distfiles (the GitHub tarball of this fork), so
+# there's nothing else to copy.
 mkdir -p srcpkgs/halley
-cp ../void/template            srcpkgs/halley/template
-cp ../void/halley-session      srcpkgs/halley/
-cp ../void/halley.desktop      srcpkgs/halley/
-cp ../void/halley.portal       srcpkgs/halley/
-cp ../void/halley-portals.conf srcpkgs/halley/
+curl -L -o srcpkgs/halley/template https://raw.githubusercontent.com/mikuri12/halley/main/void/template
 
 ./xbps-src pkg halley
 sudo xbps-install --repository hostdir/binpkgs halley
 ```
 
-After install, log out and pick **Halley** from the Noctalia/ly/SDDM menu.
-The `.desktop` points to `/usr/bin/halley-session`, which already carries
-the `dbus-run-session` guard for Void runit (no session D-Bus by default).
+After install, log out and pick **Halley** from the Noctalia/ly/SDDM menu. The
+`.desktop` points to `/usr/bin/halley-session`, which already carries the
+`dbus-run-session` guard for Void runit (no session D-Bus by default —
+without that guard the monitor hangs with "no signal" when logging in).
 
-### Runtime dependencies
+Build-time dependencies (`clang18-devel`, `wayland-devel`, ..., see `void/template`).
+Runtime dependencies (`xwayland-satellite`, `dbus`, `seatd`) are pulled in
+automatically via `depends=`.
 
-`depends=` in the template pulls in:
+### NixOS / Home Manager (flake)
 
-- `xwayland-satellite` — Halley launches it by name for X11 app support.
-- `dbus` — provides `dbus-run-session`, used by the `halley-session`
-  guard when there's no session bus.
-- `seatd` — libseat backend for DRM VT handover. Make sure your user is
-  in the `_seatd` group (or that the `seatd` runit service is enabled).
+This fork also exposes a flake under [`nix/`](./nix) with:
 
-See [`void/README.md`](./void/README.md) for the build-time dependencies
-(`clang18-devel`, `wayland-devel`, etc.) and notes.
-
-## Install on NixOS / Home Manager (flake)
-
-This repo exposes a flake under [`nix/`](./nix/) with:
-
-- `packages.${system}.halley` — the Rust derivation (callable from any
-  other flake as an input).
+- `packages.${system}.halley` — the Rust derivation (callable from any other
+  flake as an input).
 - `packages.${system}.default` — alias of `halley`.
-- `homeConfigurations.mikuri` — a ready-to-use Home Manager standalone
-  configuration that installs the package and exposes the Wayland
-  session + portal metadata.
+- `homeConfigurations.mikuri` — a ready-to-use Home Manager configuration
+  that installs the package and exposes the Wayland session + portal metadata.
 
-### Use it from your existing flake
-
-Add this repo as an input and import the package:
+#### Use it from your existing flake
 
 ```nix
-# your-flake.nix
 inputs.halley.url = "github:mikuri12/halley";
 # ...
 environment.systemPackages = [ inputs.halley.packages.${system}.halley ];
@@ -301,18 +189,17 @@ environment.systemPackages = [ inputs.halley.packages.${system}.halley ];
 home.packages = [ inputs.halley.packages.${system}.halley ];
 ```
 
-The `halley` derivation ships `passthru.providedSessions = [ "halley" ]`,
-so on NixOS you can also register it with the display manager:
+The `halley` derivation ships `passthru.providedSessions = [ "halley" ]`, so
+on NixOS you can also register it with the display manager:
 
 ```nix
 services.displayManager.sessionPackages = [ inputs.halley.packages.${system}.halley ];
 xdg.portal.extraPortals = [ inputs.halley.packages.${system}.halley ];
 ```
 
-### Apply the ready-made HM configuration
+#### Or apply the ready-made HM configuration
 
-If you just want to try it on a non-NixOS distro (Void, Arch, …) with
-Home Manager standalone:
+On a non-NixOS distro (Void, Arch, …) with Home Manager standalone:
 
 ```sh
 home-manager switch --flake github:mikuri12/halley#mikuri
@@ -321,36 +208,249 @@ home-manager switch --flake github:mikuri12/halley#mikuri
 This installs `halley`, `halleyctl`, `xdg-desktop-portal-halley` into the
 `mikuri` user profile and writes the Wayland `.desktop` + portal metadata
 into `~/.local/share/`. The `halley-session` wrapper shipped with the Nix
-package already contains the `dbus-run-session` guard (same as the Void
-one), so it works on systems without a session D-Bus.
+package already contains the `dbus-run-session` guard (same as the Void one).
 
-> Note: `home.username` is hardcoded to `mikuri` in the example config.
-> Fork the repo or override the module with your own username.
+> Note: `home.username` is hardcoded to `mikuri` in the example config. Fork
+> the repo or override the module with your own username.
 > `home.stateVersion = "25.05"`.
 
-### Notes on the Nix build
+### AUR (upstream only)
 
-- `src` is the local `../src` tree (already patched), not a
-  `fetchFromGitHub`. This means `nix build` re-reads the patch state from
-  disk — no need to re-apply anything.
-- `-C target-cpu=native` and fat-LTO are **disabled** (those were the
-  original packager's per-machine tuning). Only the EGL/wayland-client
-  link args stay, because without them Halley can't dlopen EGL and falls
-  back to polluting child envs via `LD_LIBRARY_PATH` (which breaks GLX
-  in games/browsers launched from the compositor).
-- HD530-specific `MESA_LOADER_DRIVER_OVERRIDE=iris` / `INTEL_DEBUG=no32`
-  env vars are **not** set. Add them yourself in your HM config if your
-  GPU needs the same settling the original developer's HD530 did.
+    yay -S halley
 
-## Re-applying the patch onto a newer upstream
+or
 
-```sh
-git clone --branch v0.6.0 https://github.com/saltnpepper97/halley new-halley
-cd new-halley
-git apply /path/to/halleymikuri/patches/halley-fixes.patch
+    paru -S halley
+
+Or for the latest commit:
+
+    yay -S halley-dev
+
+or
+
+    paru -S halley-dev
+
+### From Source
+
+    git clone https://github.com/mikuri12/halley
+    cd halley
+    cd src
+    cargo build --release
+
+The compositor, control CLI, and portal backend binaries will be available at:
+
+    src/target/release/halley
+    src/target/release/halleyctl
+    src/target/release/xdg-desktop-portal-halley
+
+For local testing without system-wide binaries, install them into `~/.local/bin`:
+
+    install -Dm755 src/target/release/halley ~/.local/bin/halley
+    install -Dm755 src/target/release/halleyctl ~/.local/bin/halleyctl
+    install -Dm755 src/target/release/xdg-desktop-portal-halley ~/.local/bin/xdg-desktop-portal-halley
+
+### Display Manager Session
+
+Halley's native session needs to start the tty backend rather than the nested `winit` backend. This repo ships the assets needed for display managers such as SDDM and LightDM directly in the `src/` tree:
+
+- `src/packaging/wayland-sessions/halley-session`
+- `src/packaging/wayland-sessions/halley.desktop`
+
+Install them to the standard system locations alongside the compositor binary:
+
+    sudo install -Dm755 src/target/release/halley /usr/bin/halley
+    sudo install -Dm755 src/packaging/wayland-sessions/halley-session /usr/bin/halley-session
+    sudo install -Dm644 src/packaging/wayland-sessions/halley.desktop /usr/share/wayland-sessions/halley.desktop
+    sudo install -Dm644 src/packaging/systemd-user/halley.service /usr/lib/systemd/user/halley.service
+    sudo install -Dm644 src/packaging/systemd-user/halley-shutdown.target /usr/lib/systemd/user/halley-shutdown.target
+
+`halley-session` is the recommended public launcher for a full Halley desktop session. It will start `halley.service` when a user systemd instance is available, which makes `graphical-session.target`, `xdg-desktop-autostart.target`, and related user-session units behave correctly under display managers like SDDM. If those units are not installed, the launcher falls back to executing `halley` directly.
+
+> On Void (runit, no systemd) the launcher needs the `dbus-run-session`
+> guard so Halley gets a session bus — otherwise it hangs in
+> `dbus-update-activation-environment`. Use the `void/halley-session`
+> wrapper shipped in this repo instead of the upstream one.
+
+The compositor also accepts `halley --session` for session wrappers, packagers, and service files. Normal users should prefer `halley-session`.
+
+After that, `Halley` should appear in Wayland-capable display managers.
+
+---
+
+## Default Keybinds
+
+Defaults follow Halley's shipped fresh-config template.
+
+| Category | Keybind | Action |
+|---|---|---|
+| Basic | `Super+Shift+r` | Reload config |
+| Basic | `Super+n` | Toggle state |
+| Basic | `Super+q` | Close focused window |
+| Quit | `Super+Shift+e` | Quit Halley |
+| Zoom | `Super+MouseWheelUp` | Zoom in |
+| Zoom | `Super+MouseWheelDown` | Zoom out |
+| Zoom | `Super+MiddleMouse` | Reset zoom |
+| Move | `Super+Left` | Move node left |
+| Move | `Super+Right` | Move node right |
+| Move | `Super+Up` | Move node up |
+| Move | `Super+Down` | Move node down |
+| Monitor | `Super+Shift+Left` | Focus monitor left |
+| Monitor | `Super+Shift+Right` | Focus monitor right |
+| Monitor | `Super+Shift+Up` | Focus monitor up |
+| Monitor | `Super+Shift+Down` | Focus monitor down |
+| Clusters | `Super+Shift+c` | Enter cluster mode |
+| Clusters | `Super+l` | Cycle cluster layout |
+| Bearings | `Super+z` | Show bearings |
+| Bearings | `Super+Shift+z` | Toggle bearings |
+| Trail | `Super+,` | Trail previous |
+| Trail | `Super+.` | Trail next |
+| Launch | `Super+Return` | Open terminal |
+| Launch | `Super+d` | Launch `fuzzel` |
+| Pointer | `Super+LeftMouse` | Move window |
+| Pointer | `Super+RightMouse` | Resize window |
+| Pointer | `Super+Shift+LeftMouse` | Field jump |
+| Screenshot | `Super+Shift+s` | Open capture menu |
+| Tile | `Super+Left/Right/Up/Down` | Focus tile in that direction |
+| Tile | `Super+Ctrl+Left/Right/Up/Down` | Swap tile in that direction |
+| Stacking | `Super+Left` | Cycle stack forward |
+| Stacking | `Super+Right` | Cycle stack backward |
+| Media | `XF86AudioRaiseVolume` | Raise volume |
+| Media | `XF86AudioLowerVolume` | Lower volume |
+| Media | `XF86AudioMute` | Toggle mute |
+
+---
+
+## Configuration
+
+On first launch Halley bootstraps `~/.config/halley/halley.rune` for you from an internal fully documented template, inserting detected tty monitors into the `viewport` section. Normal config precedence is `--config`/`-c`, then `HALLEY_WL_CONFIG`, then `~/.config/halley/halley.rune`, then `/etc/halley/halley.rune`, then generated user config/internal defaults. Use `halley --config /path/to/halley.rune` or `halley -c /path/to/halley.rune` to force a specific file.
+
+Handled by `crates/halley-config`. Covers input settings like repeat/focus mode, keybinds, focus ring shape and size, decay threshold, max windows per Field, viewports, autostart programs and much **more**.
+
+## Community / Support
+
+Halley has a Discord for practical support, bug triage, release updates, packaging discussion, and focused contributor coordination.
+
+Halley remains maintainer-directed. Discord is not a roadmap vote or public steering committee. Please read the rules and start in `#intake` so you can be routed to support, config help, bugs, packaging, contributing, or release-only updates.
+
+Join the Discord: https://discord.gg/cjutpDv6q
+
+## Contributing
+
+View the [contributing](CONTRIBUTING.md) guidelines before making any pull requests.
+
+---
+
+## Portals To Use
+
+- `xdg-desktop-portal-halley` for ScreenCast, including monitor and window sharing
+- `xdg-desktop-portal-gtk` for common desktop dialogs not implemented by Halley
+
+---
+
+## Website
+
+**Project website:** [saltnpepper97.github.io/halley-site](https://saltnpepper97.github.io/halley-site/)
+
+---
+
+## Inspirations
+
+- [niri](https://github.com/niri-wm/niri) — for how to do Wayland compositor things in Rust
+- [vxwm](https://codeberg.org/wh1tepearl/vxwm) — for studying some of its eyecandy
+- [hevel](https://sr.ht/~dlm/hevel/) — for zoooooooom
+- [Hyprland](https://github.com/hyprwm/hyprland) — for some config organization and eyecandy
+- [newm](https://github.com/jbuchermn/newm) — Godfather of spatial compositing
+
+---
+
+## License
+
+Released under the [**GPL-3.0**](LICENSE) license.
+
+---
+
+## Patches in this fork (Mikuri)
+
+This fork (`mikuri12/halley`) is upstream Halley v0.5.0 with six local
+fixes applied inline to `src/`. They're already in the tree you just
+cloned — no patch file you have to apply yourself. Summary of what they do
+and why:
+
+1. **Direct-scanout no longer disabled by pending frame-callbacks** — a
+   fullscreen client always has callbacks pending, and the old gate (which
+   turned off direct-scanout when callbacks were pending) made every
+   fullscreen game oscillate scanout ↔ GL and drop fps. The gate was
+   redundant: the direct-scanout path is already paced by page-flip +
+   presentation feedback. *(src/crates/halley-wl/src/backend/tty/drm.rs)*
+
+2. **Fullscreen apps cover the Top/Overlay layer-shell surfaces** — Halley
+   has no dedicated fullscreen render route, so the bar / notifications /
+   layer-shell launcher sat on top of a fullscreen app. The patch adds a
+   `current_monitor_has_settled_fullscreen` predicate and a
+   `suppress_top_overlay_layers` flag the frame builder consults to skip
+   drawing those layers when a fullscreen window is settled. The hit-test is
+   taught the same predicate, otherwise the layers stayed invisible but
+   clickable. *(drives: system.rs, draw.rs, scene.rs, surface.rs)*
+
+3. **`send_pending_configure()` instead of unconditional
+   `send_configure()`** — Chromium/Electron re-request `set_fullscreen`
+   when you switch tab/video, and the unconditional configure made them
+   re-show the "Press Esc to leave fullscreen" toast that never went away.
+   Now we use Smithay's dedup no-op. *(fullscreen/system.rs)*
+
+4. **Animated XCursor support (multi-frame)** — upstream kept only the
+   first frame of animated cursor themes, so every XCursors-animated theme
+   was stuck static. The patch adds a `FrameData{pixels_bgra, delay_ms}`
+   type, a `SoftwareCursorSprite::frame_at(elapsed_ms)` lookup, and the
+   `CursorManager` animation state. *(cursor_theme.rs, cursor.rs, draw.rs,
+   activity.rs, portal/mod.rs)*
+
+5. **Adaptive idle tick + display-fd in calloop** — the master calloop
+   timer re-armed on every iteration; the process never went idle even at
+   rest. Now it picks a slow `IDLE_TICK_MS` guard tick when no work is
+   pending, and registers the Wayland display fd in calloop so a client
+   commit wakes the loop by itself. *(backend/tty/mod.rs)*
+
+6. **CursorManager carried into the direct-scanout cursor path** — side
+   effect of fix #4: the direct-scanout cursor path read the global cache
+   directly, bypassing the animation state. The patch threads
+   `&mut CursorManager` down through the scanout path so the animation
+   keeps `started_at`/`cycle_ms` authoritative even when the cursor goes
+   out via the DRM HW plane. *(drm.rs)*
+
+These fixes are explained in code comments at the hunk they touch.
+
+### Why a separate fork?
+
+Honestly: I don't have experience writing compositors and I'm not sure these
+arreglos son the right way to fix these problems for everyone — they work on
+my setup but I don't want to push upstream something I'm not confident is the
+correct general fix. I'd rather keep them in a fork so anyone who wants to
+try Halley with Noctalia / Void / a similar layer-shell setup has something
+confortable to grab. If upstream wants to take any of them, cool — I'll be
+happier maintaining less code; if not, the fork is here.
+
+---
+
+## Layout of this repo
+
 ```
-
-If a hunk no longer applies, look at the corresponding section in this README
-— the *intent* of each fix is documented, which is usually enough to resolve
-the conflict by hand. The two `.bak-previo-*` patches are **not** meant to be
-re-applied; they're historical snapshots.
+.
+├── README.md        # this file (upstream README + the patches section above)
+├── src/             # upstream Halley v0.5.0 with the 6 fixes already applied
+│   ├── crates/      #   Cargo workspace (halley-wl = main crate)
+│   ├── packaging/   #   upstream wayland-sessions .desktop, systemd-user units,
+│   │                #   xdg-desktop-portal config, dbus services
+│   └── Cargo.toml    #   workspace manifest
+├── void/            # Void Linux packaging (xbps-src template + session wrapper)
+│   ├── template         #   xbps-src template (downloads src via distfiles, builds, installs)
+│   ├── halley-session  #   wrapper with the dbus-run-session guard for runit/no-systemd
+│   ├── halley.desktop   #   wayland-sessions .desktop pointing at /usr/bin/halley-session
+│   ├── halley.portal       #   xdg-desktop-portal backend metadata
+│   ├── halley-portals.conf #   portal routing (ScreenCast/Screenshot -> halley backend)
+│   └── README.md        #   build & install notes for Void
+├── nix/             # Nix flake exposing the package + an HM configuration
+│   ├── flake.nix        #   packages.halley + homeConfigurations.mikuri
+│   └── halley.nix       #   Rust derivation (callPackage-able)
+└── LICENSE / CONTRIBUTING.md / CHANGELOG.md  # straight from upstream
+```

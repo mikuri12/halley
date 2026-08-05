@@ -1,26 +1,23 @@
-# halley — Spatial Wayland compositor
+# halley — Spatial Wayland compositor (Mikuri fork)
 #
 # Derived from upstream Halley v0.5.0 (https://github.com/saltnpepper97/halley)
-# with the local halley-fixes.patch already applied:
+# with the following local fixes already applied inline in src/:
 #   - direct-scanout no longer disabled by pending frame-callbacks
 #   - fullscreen apps cover the Top/Overlay layer-shell surfaces (render + hit-test)
 #   - send_pending_configure() dedup (Chromium toast spam)
 #   - animated XCursor support (multi-frame)
 #   - adaptive idle tick + display-fd in calloop (drops idle CPU)
 #
-# The src/ tree is the upstream v0.5.0 with halley-fixes.patch already applied,
-# so no patches= entry is needed here. Cargo.lock lives in src/.
+# Notes:
+#   - The src/ tree is already patched in the distfiles tarball: no patches= needed.
+#   - The halley-session wrapper ships a dbus-run-session guard for runit/no-systemd
+#     distros (without it the "no signal" bug appears on Void when logging in via ly).
 #
-# Build instructions (see ../void/README.md for the full flow):
-#   1. clone https://github.com/void-linux/void-packages
-#   2. mkdir srcpkgs/halley
-#   3. cp ../void/template            srcpkgs/halley/template
-#      cp ../void/halley-session      srcpkgs/halley/
-#      cp ../void/halley.desktop      srcpkgs/halley/
-#      cp ../void/halley.portal       srcpkgs/halley/
-#      cp ../void/halley-portals.conf srcpkgs/halley/
-#   4. ./xbps-src pkg halley
-#   5. sudo xbps-install --repository hostdir/binpkgs halley
+# Build & install:
+#   ./xbps-src pkg halley
+#   sudo xbps-install --repository hostdir/binpkgs halley
+#
+# After install, log out and pick "Halley" from the greeter menu.
 
 pkgname=halley
 version=0.5.0
@@ -32,10 +29,23 @@ makedepends="pkg-config clang18-devel libclang18 wayland-devel libxkbcommon-deve
  libinput-devel libseat-devel libudev-devel libgbm-devel libdrm-devel
  libglvnd-devel pixman-devel dbus-devel pipewire-devel"
 depends="xwayland-satellite dbus seatd"
-short_desc="Spatial Wayland compositor (mikuri's fork with local fixes)"
+short_desc="Spatial Wayland compositor (Mikuri fork with local fixes)"
 maintainer="mikuri12 <https://github.com/mikuri12>"
 license="GPL-3.0-only"
 homepage="https://github.com/mikuri12/halley"
+
+# Tarball of the Mikuri fork HEAD on the main branch.
+# To pin to a specific release, replace with:
+#   https://github.com/mikuri12/halley/archive/refs/tags/v0.5.0-mikuri.1.tar.gz
+# and update `checksum` accordingly.
+distfiles="https://github.com/mikuri12/halley/archive/refs/heads/main.tar.gz"
+# Replace with the actual sha256 of the tarball if xbps-src complains,
+# computed with: curl -sL https://github.com/mikuri12/halley/archive/refs/heads/main.tar.gz | sha256sum
+checksum="GENERATED_BY_XBPS_SRC"
+
+# xbps-src unpacks the tarball into ${wrksrc}/. The tarball contains the
+# repo root (README, src/, void/, nix/, ...), so the cargo workspace lives at
+# ${wrksrc}/src/.
 
 do_build() {
 	cd "${wrksrc}/src"
@@ -47,15 +57,22 @@ do_install() {
 	vbin target/release/halley halley
 	vbin target/release/halleyctl halleyctl
 	vbin target/release/xdg-desktop-portal-halley xdg-desktop-portal-halley
+	# Wrapper with the dbus-run-session guard for Void runit.
 	vbin ${wrksrc}/void/halley-session halley-session
 
+	# Wayland-sessions .desktop so the greeter sees Halley.
 	vmkdir usr/share/wayland-sessions
 	vinstall ${wrksrc}/void/halley.desktop 644 usr/share/wayland-sessions halley.desktop
 
+	# xdg-desktop-portal backend metadata + routing config.
+	# xdg-desktop-portal discovers backends through these files; without them
+	# the halley ScreenCast/Screenshot (dmabuf zero-copy) won't be offered.
 	vmkdir usr/share/xdg-desktop-portal/portals
 	vinstall ${wrksrc}/void/halley.portal 644 usr/share/xdg-desktop-portal/portals halley.portal
 	vinstall ${wrksrc}/void/halley-portals.conf 644 usr/share/xdg-desktop-portal halley-portals.conf
 
+	# D-Bus service file for the portal backend (so xdg-desktop-portal can
+	# autolaunch xdg-desktop-portal-halley when ScreenCast is requested).
 	vinstall ${wrksrc}/src/packaging/dbus-1/services/org.freedesktop.impl.portal.desktop.halley.service \
 		644 usr/share/dbus-1/services org.freedesktop.impl.portal.desktop.halley.service
 }
