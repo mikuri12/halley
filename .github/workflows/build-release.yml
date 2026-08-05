@@ -1,0 +1,80 @@
+name: Build Release Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config clang libwayland-dev libxkbcommon-dev \
+            libinput-dev libseat-dev libudev-dev libgbm-dev \
+            libdrm-dev libgl1-mesa-dev libpixman-1-dev \
+            libdbus-1-dev libpipewire-0.3-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release
+        run: |
+          cd src
+          cargo build --release --locked
+
+      - name: Package binaries
+        run: |
+          mkdir -p halley-binaries/bin
+          mkdir -p halley-binaries/share/wayland-sessions
+          mkdir -p halley-binaries/share/xdg-desktop-portal/portals
+          mkdir -p halley-binaries/share/dbus-1/services
+
+          # Binarios
+          cp src/target/release/halley halley-binaries/bin/
+          cp src/target/release/halleyctl halley-binaries/bin/
+          cp src/target/release/xdg-desktop-portal-halley halley-binaries/bin/
+          cp void/halley-session halley-binaries/bin/
+
+          # Archivos de sistema
+          cp void/halley.desktop halley-binaries/share/wayland-sessions/
+          cp void/halley.portal halley-binaries/share/xdg-desktop-portal/portals/
+          cp void/halley-portals.conf halley-binaries/share/xdg-desktop-portal/
+          cp src/packaging/dbus-1/services/org.freedesktop.impl.portal.desktop.halley.service \
+            halley-binaries/share/dbus-1/services/
+
+          # Crear tarball
+          tar czf halley-binaries-x86_64.tar.gz halley-binaries/
+
+      - name: Generate checksum
+        run: |
+          sha256sum halley-binaries-x86_64.tar.gz > halley-binaries-x86_64.tar.gz.sha256
+          cat halley-binaries-x86_64.tar.gz.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: halley-binaries-x86_64
+          path: |
+            halley-binaries-x86_64.tar.gz
+            halley-binaries-x86_64.tar.gz.sha256
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            halley-binaries-x86_64.tar.gz
+            halley-binaries-x86_64.tar.gz.sha256
+          body: |
+            Prebuilt binaries for Halley ${{ github.ref_name }}
+
+            Para instalar en Void Linux con xbps, descarga el template modificado.

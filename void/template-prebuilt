@@ -1,0 +1,66 @@
+# halley — Spatial Wayland compositor (Mikuri fork, prebuilt binaries)
+#
+# Este template descarga binarios precompilados desde GitHub Releases.
+# Los binarios se compilan en GitHub Actions con cada release tag.
+#
+# Ventajas vs compilar local:
+#   - No requiere cargo/rust/clang localmente
+#   - Instalación ~100x más rápida (solo descarga + verifica deps)
+#   - Menos uso de disco (no target/ ni registry de cargo)
+#
+# Build & install:
+#   ./xbps-src pkg halley
+#   sudo xbps-install --repository hostdir/binpkgs halley
+
+pkgname=halley
+version=0.5.0
+revision=1
+archs="x86_64*"
+# Runtime deps solamente (no build deps)
+depends="xwayland-satellite dbus seatd wayland libxkbcommon libinput
+ libseat libudev-zero libgbm libdrm libglvnd pixman pipewire"
+short_desc="Spatial Wayland compositor (Mikuri fork, prebuilt binaries)"
+maintainer="mikuri12 <https://github.com/mikuri12>"
+license="GPL-3.0-only"
+homepage="https://github.com/mikuri12/halley"
+
+# Tarball de binarios precompilados desde GitHub Release.
+# Actualizar version + checksum con cada release:
+#   1. Publicar tag en GitHub (ej: v0.5.0-mikuri.2)
+#   2. GitHub Actions genera halley-binaries-x86_64.tar.gz
+#   3. Descargar .sha256 del release y copiar checksum aquí
+distfiles="https://github.com/mikuri12/halley/releases/download/v${version}-mikuri.1/halley-binaries-x86_64.tar.gz"
+checksum=SKIP  # CAMBIAR: reemplazar con sha256sum del release
+
+# xbps-src desempaqueta a ${wrksrc}/. El tarball contiene halley-binaries/*
+skip_extraction=manual
+
+do_extract() {
+	tar xzf ${XBPS_SRCDISTDIR}/${pkgname}-${version}/halley-binaries-x86_64.tar.gz \
+		-C "${wrksrc}" --strip-components=1
+}
+
+do_install() {
+	# Binarios
+	vbin bin/halley
+	vbin bin/halleyctl
+	vbin bin/xdg-desktop-portal-halley
+	vbin bin/halley-session
+
+	# Wayland session .desktop
+	vmkdir usr/share/wayland-sessions
+	vinstall share/wayland-sessions/halley.desktop 644 \
+		usr/share/wayland-sessions
+
+	# xdg-desktop-portal backend metadata
+	vmkdir usr/share/xdg-desktop-portal/portals
+	vinstall share/xdg-desktop-portal/portals/halley.portal 644 \
+		usr/share/xdg-desktop-portal/portals
+	vinstall share/xdg-desktop-portal/halley-portals.conf 644 \
+		usr/share/xdg-desktop-portal
+
+	# D-Bus service autolaunch
+	vmkdir usr/share/dbus-1/services
+	vinstall share/dbus-1/services/org.freedesktop.impl.portal.desktop.halley.service \
+		644 usr/share/dbus-1/services
+}
