@@ -37,7 +37,7 @@ homepage="https://github.com/mikuri12/halley"
 # Pinned release tarball of the Mikuri fork. Stable: the tag is immutable,
 # so this checksum won't drift when new commits land on main.
 distfiles="https://github.com/mikuri12/halley/archive/refs/tags/v0.5.0-mikuri.1.tar.gz"
-checksum="3ea90a8025f661525ace105d046f8553a33aa7814cb36380e0295652ddd5b3bd"
+checksum="6edb70e129149fd779d556c8ccf5818773c9ceb5d55aa0ee602c384cb08e17e4"
 # To re-pin to a future release, replace the URL with the next tag and
 # recompute: curl -sL <url> | sha256sum
 
