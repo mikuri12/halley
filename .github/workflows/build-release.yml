@@ -6,6 +6,12 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Necesario para que el GITHUB_TOKEN pueda crear releases y subir assets.
+# Por defecto el token es de solo lectura y softprops/action-gh-release
+# falla con "GitHub release failed with status: 403".
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -69,7 +75,7 @@ jobs:
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             halley-binaries-x86_64.tar.gz
