@@ -15,7 +15,7 @@
 #
 # Build & install:
 #   ./xbps-src pkg halley
-#   sudo xbps-install --repository hostdir/binpkgs halley
+#   doas xbps-install --repository hostdir/binpkgs halley   # o sudo
 #
 # After install, log out and pick "Halley" from the greeter menu.
 
@@ -25,7 +25,7 @@ revision=1
 archs="x86_64*"
 build_style=cargo
 hostmakedepends="pkg-config rust cargo"
-makedepends="pkg-config clang18-devel libclang18 wayland-devel libxkbcommon-devel
+makedepends="clang18-devel libclang18 wayland-devel libxkbcommon-devel
  libinput-devel libseat-devel libudev-devel libgbm-devel libdrm-devel
  libglvnd-devel pixman-devel dbus-devel pipewire-devel"
 depends="xwayland-satellite dbus seatd"
@@ -34,24 +34,36 @@ maintainer="mikuri12 <https://github.com/mikuri12>"
 license="GPL-3.0-only"
 homepage="https://github.com/mikuri12/halley"
 
-# Pinned release tarball of the Mikuri fork. Stable: the tag is immutable,
-# so this checksum won't drift when new commits land on main.
+# Pinned release tarball of the Mikuri fork.
+#
+# IMPORTANTE: no mover el tag v0.5.0-mikuri.1 nunca más. GitHub regenera el
+# tarball cuando el tag apunta a otro commit, y el SHA256 cambia. El bucle
+# "cambio checksum -> muevo tag -> checksum cambia" es lo que rompía el build.
+# Para una nueva versión: crear un tag NUEVO, no re-apuntar este.
 distfiles="https://github.com/mikuri12/halley/archive/refs/tags/v0.5.0-mikuri.1.tar.gz"
-checksum="59b853f68aee760303386e91f42bb8be28ca90cd6c5a284f462e666d31729122"
-# To re-pin to a future release, replace the URL with the next tag and
-# recompute: curl -sL <url> | sha256sum
+checksum="3b6deed7c41d476ba01c5f4e7e826277fc122f41bd5b22c6cb28900b29a7c2c6"
+# Para re-pinear a un tag futuro, reemplazar la URL y recalcular:
+#   curl -sL <url> | sha256sum
+
+# El tarball de GitHub se extrae en halley-0.5.0-mikuri.1/, no en el
+# ${pkgname}-${version} que xbps-src asume por defecto.
+wrksrc="${pkgname}-${version}-mikuri.1"
+# El workspace de cargo vive en src/, no en la raíz del repo.
+build_wrksrc="src"
 
 # xbps-src unpacks the tarball into ${wrksrc}/. The tarball contains the
 # repo root (README, src/, void/, nix/, ...), so the cargo workspace lives at
-# ${wrksrc}/src/.
+# ${wrksrc}/src/ — declarado arriba como build_wrksrc.
 
+# do_build propio: el do_build de build_style=cargo pasa --target ${RUST_TARGET},
+# lo que deja los binarios en target/${RUST_TARGET}/release/. Compilando sin
+# --target quedan en target/release/, que es lo que espera do_install.
 do_build() {
-	cd "${wrksrc}/src"
 	cargo build --release
 }
 
 do_install() {
-	cd "${wrksrc}/src"
+	# cwd = ${wrksrc}/${build_wrksrc} = .../src
 	vbin target/release/halley halley
 	vbin target/release/halleyctl halleyctl
 	vbin target/release/xdg-desktop-portal-halley xdg-desktop-portal-halley
