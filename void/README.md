@@ -1,21 +1,50 @@
 # Building the Void Linux package
 
-The xbps-src `template` here builds the compositor as a normal Void
-package, downloading the source directly from this fork on GitHub via
-`distfiles`. You don't copy any local files besides the template itself.
+Two installation methods available:
 
-## How to build & install
+1. **Prebuilt binaries** — fast, no Rust/Cargo needed
+2. **Compile from source** (`template`) — full build from scratch
+
+## Option 1: Prebuilt binaries (recommended)
+
+Downloads binaries built inside a Void glibc container by GitHub Actions.
+
+Grab the `template` asset **from the release**, not `void/template-prebuilt`
+from this repo — the in-repo file is a placeholder stub (`@TAG@`,
+`@CHECKSUM@`) that Actions fills in at release time.
 
 ```sh
-git clone https://github.com/void-linux/void-packages.git
+git clone --depth=1 https://github.com/void-linux/void-packages.git
 cd void-packages
+./xbps-src binary-bootstrap
+
+mkdir -p srcpkgs/halley
+curl -L -o srcpkgs/halley/template \
+  https://github.com/mikuri12/halley/releases/download/v0.5.0-mikuri.2/template
+
+./xbps-src pkg halley
+doas xbps-install --repository hostdir/binpkgs halley   # or sudo
+```
+
+**No build dependencies required**, and no checksum to paste — the release
+template ships with it already filled in.
+
+See [README-PREBUILT.md](README-PREBUILT.md) for the full workflow (publishing
+releases, why the build runs in a Void container).
+
+## Option 2: Compile from source
+
+```sh
+git clone --depth=1 https://github.com/void-linux/void-packages.git
+cd void-packages
+./xbps-src binary-bootstrap
 
 # Drop only the template (everything else is fetched by xbps-src):
 mkdir -p srcpkgs/halley
 curl -L -o srcpkgs/halley/template https://raw.githubusercontent.com/mikuri12/halley/main/void/template
 
 ./xbps-src pkg halley
-sudo xbps-install --repository hostdir/binpkgs halley
+doas xbps-install --repository hostdir/binpkgs halley   # or sudo
 ```
 
 After install, log out and pick **Halley** from the Noctalia/ly/SDDM menu.
@@ -38,29 +67,41 @@ The portal backend is registered through the metadata + D-Bus service; no
 
 ## Build-time dependencies
 
-The template pulls `pkg-config`, `rust`, `cargo`, `clang18-devel`,
-`libclang18`, `wayland-devel`, `libxkbcommon-devel`, `libinput-devel`,
-`libseat-devel`, `libudev-devel`, `libgbm-devel`, `libdrm-devel`,
-`libglvnd-devel`, `pixman-devel`, `dbus-devel`, `pipewire-devel`.
+Only Option 2 (source) pulls these: `pkg-config`, `rust`, `cargo`,
+`clang18-devel`, `libclang18`, `wayland-devel`, `libxkbcommon-devel`,
+`libinput-devel`, `libseat-devel`, `libudev-devel`, `libgbm-devel`,
+`libdrm-devel`, `libglvnd-devel`, `pixman-devel`, `dbus-devel`,
+`pipewire-devel`.
 
 `clang18-devel` + `libclang18` are needed because `input-sys` and `libseat`
 generate bindings via `bindgen`.
 
+Option 1 (prebuilt) pulls **none** of them.
+
 ## Runtime dependencies
 
-Pulled in automatically via `depends=`:
+Declared explicitly via `depends=`:
 
 - `xwayland-satellite` — Halley launches it by name for X11 app support.
 - `dbus` — provides `dbus-run-session`, used by the `halley-session` guard.
 - `seatd` — libseat backend for DRM VT handover. Make sure your user is
   in the `_seatd` group (or that the `seatd` runit service is enabled).
 
+The shared libraries (wayland, libxkbcommon, libinput, libseat, libudev,
+libgbm, libdrm, libglvnd, pixman, pipewire) are *not* listed by hand:
+`xbps-src` scans the built ELFs and records them as `shlib-requires`, so
+`xbps-install` pulls them in automatically.
+
 ## Notes
 
-- `archs="x86_64*"`: the fork has only been tested on glibc x86_64. musl
-  should work in principle (Halley is pure Rust) but is untested.
-- The `checksum` in the template is the SHA256 of the pinned release
-  tarball `refs/tags/v0.5.0-mikuri.1.tar.gz`. Pinning to a tag (not to
-  `refs/heads/main`) keeps the checksum stable across future commits.
-- To re-pin to a new release, push the new tag and recompute:
+- `archs`: `x86_64*` for the source template (musl untested but plausible —
+  Halley is pure Rust). The prebuilt template is `x86_64` with no `*`, since
+  those binaries are glibc-linked and won't run on musl.
+- **Never move a published tag.** GitHub regenerates the archive when a tag
+  is repointed, so the SHA256 changes and the build breaks with a checksum
+  mismatch. Cut a new tag instead.
+- The source template pins `refs/tags/v0.5.0-mikuri.1.tar.gz`. To re-pin,
+  push a new tag and recompute:
   `curl -sL https://github.com/mikuri12/halley/archive/refs/tags/<newtag>.tar.gz | sha256sum`.
+- The prebuilt template needs no manual checksum: GitHub Actions injects it
+  when publishing the release.

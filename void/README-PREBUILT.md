@@ -1,86 +1,96 @@
 # Instalación con binarios precompilados
 
-Este directorio contiene dos templates xbps para Halley:
+Este directorio trae dos templates xbps para Halley:
 
-- **`template`** — compila desde source (requiere Rust/Cargo local, pesado)
-- **`template-prebuilt`** — descarga binarios desde GitHub Releases (~100x más rápido)
+- **`template`** — compila desde fuente (necesita Rust/Cargo local, lento)
+- **`template-prebuilt`** — *plantilla* del que descarga binarios ya compilados
 
-## Flujo de trabajo
+`template-prebuilt` **no se usa directamente**: lleva los placeholders `@TAG@` y
+`@CHECKSUM@`. GitHub Actions los sustituye y publica el resultado como asset
+`template` del release. Ese es el que se descarga.
 
-### 1. Publicar release en GitHub
+## Instalar (lo único que hace falta normalmente)
 
-```bash
-# En tu fork local
-git tag v0.5.0-mikuri.2
-git push origin v0.5.0-mikuri.2
-```
+```sh
+git clone --depth=1 https://github.com/void-linux/void-packages.git
+cd void-packages
+./xbps-src binary-bootstrap
 
-GitHub Actions (`.github/workflows/build-release.yml`) compila automáticamente:
-- Binarios: `halley`, `halleyctl`, `xdg-desktop-portal-halley`
-- Archivos de sistema: `.desktop`, portals config, D-Bus service
-- Empaqueta todo en `halley-binaries-x86_64.tar.gz`
-- Publica en GitHub Release con checksum SHA256
+mkdir -p srcpkgs/halley
+curl -L -o srcpkgs/halley/template \
+  https://github.com/mikuri12/halley/releases/download/v0.5.0-mikuri.2/template
 
-### 2. Actualizar template-prebuilt
-
-Después que GH Actions complete:
-
-1. Descargar checksum del release:
-   ```bash
-   curl -L https://github.com/mikuri12/halley/releases/download/v0.5.0-mikuri.2/halley-binaries-x86_64.tar.gz.sha256
-   ```
-
-2. Copiar el hash SHA256 en `template-prebuilt`:
-   ```bash
-   checksum="<pegar_hash_aqui>"
-   ```
-
-3. Actualizar `version` y `revision` si cambiaron:
-   ```bash
-   version=0.5.0
-   revision=2  # incrementar con cada rebuild del mismo version
-   ```
-
-### 3. Instalar en Void Linux
-
-```bash
-# Copiar template-prebuilt al repo xbps-src
-cp template-prebuilt ~/void-packages/srcpkgs/halley/template
-
-# Compilar paquete (solo descarga + empaqueta, no compila Rust)
-cd ~/void-packages
 ./xbps-src pkg halley
-
-# Instalar
-sudo xbps-install --repository hostdir/binpkgs halley
+doas xbps-install --repository hostdir/binpkgs halley
 ```
 
-## Ventajas vs compilación local
+El template del release ya trae el checksum correcto: no hay que editar nada.
+`./xbps-src pkg` no compila Rust — descarga el tarball, verifica el SHA256 y
+empaqueta.
 
-| Aspecto | Local (`template`) | Prebuilt (`template-prebuilt`) |
-|---------|-------------------|-------------------------------|
-| Tiempo instalación | ~20-40 min | ~30 segundos |
-| Deps build | rust, cargo, clang18, 10+ libs | ninguna |
-| Uso disco | +2GB (cargo registry + target/) | ~15MB |
-| Reproducibilidad | depende de rustc local | binarios idénticos |
+## Publicar una versión nueva
 
-## Verificación de deps runtime
+```sh
+git tag v0.5.0-mikuri.3
+git push origin v0.5.0-mikuri.3
+```
 
-`template-prebuilt` verifica automáticamente las dependencias runtime:
-- xwayland-satellite, dbus, seatd
-- wayland, libxkbcommon, libinput, libseat
-- libudev-zero, libgbm, libdrm, libglvnd
-- pixman, pipewire
+El workflow `.github/workflows/build-release.yml` hace el resto:
 
-Si falta algo, xbps lo instalará automáticamente.
+1. Compila el workspace **dentro de un contenedor Void glibc**
+   (`ghcr.io/void-linux/void-glibc-full`), no en el runner Ubuntu.
+2. Empaqueta binarios + `.desktop` + metadata de portals + servicio D-Bus en
+   `halley-binaries-<tag>-x86_64.tar.gz`.
+3. Calcula el SHA256 y lo inyecta en `template-prebuilt` → asset `template`.
+4. Publica tarball, `.sha256` y `template` en el release.
+
+**No muevas un tag ya publicado.** GitHub regenera el tarball y el SHA256 cambia;
+es lo que rompía el `template` de fuente antes. Para una versión nueva, tag nuevo.
+
+### Por qué el contenedor Void y no Ubuntu
+
+Un binario linkeado en Ubuntu no arranca en Void: las sonames no coinciden
+(`libinput.so.10`, `libseat.so.1`, …) y la glibc es otra. Compilando dentro de la
+imagen de Void, los binarios linkean contra las mismas libs que el sistema
+destino.
+
+Se usa `docker run` en vez de la clave `container:` de Actions porque la imagen
+de Void no trae `node` y `actions/checkout` no podría ejecutarse.
+
+## Comparación
+
+| Aspecto | `template` (fuente) | `template` del release (prebuilt) |
+|---------|--------------------|-----------------------------------|
+| Tiempo | decenas de minutos | segundos |
+| Deps de build | rust, cargo, clang18 + ~14 `-devel` | ninguna |
+| Disco | ~2GB (`target/` + registry) | ~15MB |
+| Reproducible | depende del rustc local | binario idéntico para todos |
+
+## Dependencias de runtime
+
+El template solo declara lo que xbps no puede deducir del ELF:
+
+```
+depends="xwayland-satellite dbus seatd"
+```
+
+Las libs compartidas (wayland, libxkbcommon, libinput, libseat, libudev, libgbm,
+libdrm, libglvnd, pixman, pipewire) las detecta `xbps-src` escaneando los
+binarios y las añade como `shlib-requires`. Declararlas a mano solo sirve para
+equivocarse de nombre. `xbps-install` las instala si faltan.
 
 ## Troubleshooting
 
-**Error: "checksum mismatch"**
-→ Hash SHA256 en template-prebuilt no coincide. Reemplazar con el del release.
+**`checksum mismatch`**
+→ Descargaste `void/template-prebuilt` del repo en vez del asset `template` del
+release. El del repo lleva `@CHECKSUM@` sin sustituir.
 
-**Error: "404 Not Found"**
-→ Release tag no existe. Verificar que GH Actions completó exitosamente.
+**`404 Not Found` al bajar el distfile**
+→ El release no existe o el workflow falló. Mirar la pestaña Actions.
 
-**Binarios no ejecutan**
-→ Verificar arquitectura (`uname -m` debe ser `x86_64`) y que las libs runtime estén instaladas.
+**`ERROR: Package 'halley' not found in repository pool'`**
+→ `./xbps-src pkg halley` falló antes; el error real está más arriba en su
+salida. `xbps-install` no tiene nada que instalar.
+
+**El binario no arranca / falta un `.so`**
+→ Comprobar que el paso "Build inside Void container" del workflow corrió.

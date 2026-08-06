@@ -20,35 +20,52 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      # Compilamos DENTRO de un contenedor Void, no en el runner Ubuntu.
+      # Un binario linkeado contra las libs de Ubuntu no arranca en Void:
+      # las sonames no coinciden (libinput.so.10, libseat.so.1, ...) y la
+      # glibc es otra. Usamos `docker run` en vez de `container:` porque la
+      # imagen de Void no trae node y actions/checkout no podria correr.
+      - name: Build inside Void container
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            pkg-config clang libwayland-dev libxkbcommon-dev \
-            libinput-dev libseat-dev libudev-dev libgbm-dev \
-            libdrm-dev libgl1-mesa-dev libpixman-1-dev \
-            libdbus-1-dev libpipewire-0.3-dev
+          docker run --rm -v "$PWD":/work -w /work \
+            ghcr.io/void-linux/void-glibc-full:latest \
+            bash -euxo pipefail -c '
+              # xbps se actualiza a si mismo primero o se queja al resto.
+              xbps-install -Syu xbps
+              xbps-install -yu
+              xbps-install -y \
+                pkg-config rust cargo \
+                clang18-devel libclang18 wayland-devel libxkbcommon-devel \
+                libinput-devel libseat-devel libudev-devel libgbm-devel \
+                libdrm-devel libglvnd-devel pixman-devel dbus-devel \
+                pipewire-devel
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build release
-        run: |
-          cd src
-          cargo build --release --locked
+              cd src
+              cargo build --release --locked
+            '
 
       - name: Package binaries
         run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          TARBALL="halley-binaries-${TAG}-x86_64.tar.gz"
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+
+          # El top-level del tar es halley-binaries/: el template lo espera
+          # como wrksrc, asi que no hace falta do_extract propio.
           mkdir -p halley-binaries/bin
           mkdir -p halley-binaries/share/wayland-sessions
           mkdir -p halley-binaries/share/xdg-desktop-portal/portals
           mkdir -p halley-binaries/share/dbus-1/services
 
-          # Binarios
-          cp src/target/release/halley halley-binaries/bin/
-          cp src/target/release/halleyctl halley-binaries/bin/
-          cp src/target/release/xdg-desktop-portal-halley halley-binaries/bin/
-          cp void/halley-session halley-binaries/bin/
+          # Binarios (root en el contenedor los dejo con su uid; da igual,
+          # xbps-src reinstala permisos al empaquetar).
+          sudo cp src/target/release/halley halley-binaries/bin/
+          sudo cp src/target/release/halleyctl halley-binaries/bin/
+          sudo cp src/target/release/xdg-desktop-portal-halley halley-binaries/bin/
+          sudo cp void/halley-session halley-binaries/bin/
+          sudo chown -R "$(id -u):$(id -g)" halley-binaries
+          chmod 755 halley-binaries/bin/*
 
           # Archivos de sistema
           cp void/halley.desktop halley-binaries/share/wayland-sessions/
@@ -57,30 +74,55 @@ jobs:
           cp src/packaging/dbus-1/services/org.freedesktop.impl.portal.desktop.halley.service \
             halley-binaries/share/dbus-1/services/
 
-          # Crear tarball
-          tar czf halley-binaries-x86_64.tar.gz halley-binaries/
+          tar czf "$TARBALL" halley-binaries/
+          sha256sum "$TARBALL" > "$TARBALL.sha256"
+          cat "$TARBALL.sha256"
 
-      - name: Generate checksum
+      # Genera el template xbps ya con el tag y el checksum rellenos, para
+      # que instalar no requiera copiar hashes a mano.
+      - name: Generate xbps template
         run: |
-          sha256sum halley-binaries-x86_64.tar.gz > halley-binaries-x86_64.tar.gz.sha256
-          cat halley-binaries-x86_64.tar.gz.sha256
+          CHECKSUM=$(sha256sum "$TARBALL" | cut -d' ' -f1)
+          sed -e "s|@TAG@|${TAG}|g" -e "s|@CHECKSUM@|${CHECKSUM}|g" \
+            void/template-prebuilt > template
+          echo "--- template generado ---"
+          cat template
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: halley-binaries-x86_64
           path: |
-            halley-binaries-x86_64.tar.gz
-            halley-binaries-x86_64.tar.gz.sha256
+            ${{ env.TARBALL }}
+            ${{ env.TARBALL }}.sha256
+            template
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            halley-binaries-x86_64.tar.gz
-            halley-binaries-x86_64.tar.gz.sha256
+            ${{ env.TARBALL }}
+            ${{ env.TARBALL }}.sha256
+            template
           body: |
-            Prebuilt binaries for Halley ${{ github.ref_name }}
+            Binarios precompilados de Halley `${{ github.ref_name }}`,
+            construidos dentro de un contenedor Void glibc (x86_64).
 
-            Para instalar en Void Linux con xbps, descarga el template modificado.
+            ## Instalar en Void Linux
+
+            ```sh
+            git clone --depth=1 https://github.com/void-linux/void-packages.git
+            cd void-packages
+            ./xbps-src binary-bootstrap
+
+            mkdir -p srcpkgs/halley
+            curl -L -o srcpkgs/halley/template \
+              https://github.com/mikuri12/halley/releases/download/${{ github.ref_name }}/template
+
+            ./xbps-src pkg halley
+            doas xbps-install --repository hostdir/binpkgs halley
+            ```
+
+            El `template` de este release ya trae el checksum correcto: no hay
+            que editarlo. No compila Rust, solo descarga y empaqueta.
