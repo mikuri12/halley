@@ -27,13 +27,17 @@ jobs:
       # imagen de Void no trae node y actions/checkout no podria correr.
       - name: Build inside Void container
         run: |
+          # La imagen de Void no trae bash en $PATH, asi que el intérprete es
+          # /bin/sh con ruta absoluta. Por eso no hay `-o pipefail`: no es POSIX.
           docker run --rm -v "$PWD":/work -w /work \
+            -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
             ghcr.io/void-linux/void-glibc-full:latest \
-            bash -euxo pipefail -c '
+            /bin/sh -eux -c '
               # xbps se actualiza a si mismo primero o se queja al resto.
               xbps-install -Syu xbps
               xbps-install -yu
-              xbps-install -y \
+              # bash va explicito: algun build.rs puede asumirlo presente.
+              xbps-install -y bash \
                 pkg-config rust cargo \
                 clang18-devel libclang18 wayland-devel libxkbcommon-devel \
                 libinput-devel libseat-devel libudev-devel libgbm-devel \
@@ -42,6 +46,10 @@ jobs:
 
               cd src
               cargo build --release --locked
+
+              # El contenedor corre como root: sin esto los artefactos quedan
+              # de root en el runner y el paso siguiente necesitaria sudo.
+              chown -R "$HOST_UID:$HOST_GID" target
             '
 
       - name: Package binaries
@@ -58,13 +66,12 @@ jobs:
           mkdir -p halley-binaries/share/xdg-desktop-portal/portals
           mkdir -p halley-binaries/share/dbus-1/services
 
-          # Binarios (root en el contenedor los dejo con su uid; da igual,
-          # xbps-src reinstala permisos al empaquetar).
-          sudo cp src/target/release/halley halley-binaries/bin/
-          sudo cp src/target/release/halleyctl halley-binaries/bin/
-          sudo cp src/target/release/xdg-desktop-portal-halley halley-binaries/bin/
-          sudo cp void/halley-session halley-binaries/bin/
-          sudo chown -R "$(id -u):$(id -g)" halley-binaries
+          # Binarios (ya vienen con el uid del runner: el contenedor hizo
+          # chown al terminar de compilar).
+          cp src/target/release/halley halley-binaries/bin/
+          cp src/target/release/halleyctl halley-binaries/bin/
+          cp src/target/release/xdg-desktop-portal-halley halley-binaries/bin/
+          cp void/halley-session halley-binaries/bin/
           chmod 755 halley-binaries/bin/*
 
           # Archivos de sistema
