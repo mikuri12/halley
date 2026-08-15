@@ -135,3 +135,34 @@ jobs:
 
             El `template` de este release ya trae el checksum correcto: no hay
             que editarlo. No compila Rust, solo descarga y empaqueta.
+
+  # Promociona dev -> main cuando el build ha pasado.
+  #
+  # OJO: la puerta es "compila", no "funciona". Un commit que compile pero
+  # rompa el compositor en runtime llegara a main igualmente. Si eso importa,
+  # quita este job y usa un PR con revision manual.
+  promote:
+    needs: build
+    # Solo en pushes a dev: en tags no tiene sentido (ya son la referencia
+    # publicada) y en workflow_dispatch podria promocionar algo no intencionado.
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Historia completa: sin esto el merge no encuentra la base comun.
+          fetch-depth: 0
+
+      - name: Fast-forward main to dev
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout main
+          # --ff-only a proposito: si main ha divergido de dev, preferimos que
+          # el job falle y avise antes que crear un merge commit a ciegas.
+          git merge --ff-only "$GITHUB_SHA"
+          git push origin main
