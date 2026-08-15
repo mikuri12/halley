@@ -1919,6 +1919,15 @@ pub(crate) fn run_tty_backend() -> Result<(), Box<dyn Error>> {
                             &mut device,
                             &st.runtime.tuning.input,
                         );
+                        // Sincroniza los LEDs del dispositivo con el estado actual del
+                        // teclado. Hace falta aquí ademas del hook `led_state_changed`
+                        // porque Smithay solo notifica en los *cambios*: un teclado
+                        // enchufado a mitad de sesion (o el que ya esta presente al
+                        // arrancar) entraria con la mascara de LEDs que traiga el kernel
+                        // en vez de la que refleja el estado real de Caps/Num Lock.
+                        if let Some(keyboard) = st.platform.seat.get_keyboard() {
+                            device.led_update(keyboard.led_state().into());
+                        }
                         st.input.devices.push(device);
                     }
                     InputEvent::DeviceRemoved { device } => {

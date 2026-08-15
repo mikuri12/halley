@@ -2,6 +2,7 @@ use super::*;
 use crate::compositor::{focus, fullscreen, interaction, monitor, spawn, workspace};
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::input::TabletToolDescriptor;
+use smithay::input::keyboard::LedState;
 use smithay::input::pointer::PointerHandle;
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as XdgDecorationMode;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
@@ -64,6 +65,25 @@ impl SeatHandler for Halley {
         crate::compositor::platform::refresh_cursor_surface_outputs(self);
         self.runtime.tty_redraw_all = true;
         self.request_maintenance();
+    }
+
+    /// Propaga el estado de los LEDs del teclado (Caps/Num/Scroll Lock) a los
+    /// dispositivos libinput físicos.
+    ///
+    /// Smithay mantiene el estado de los LEDs en su xkb interno y llama a este
+    /// hook cada vez que cambia, pero la implementación por defecto del trait
+    /// está vacía. Sin sobrescribirla nunca se invoca
+    /// `libinput_device_led_update()`: el kernel jamás actualiza los LEDs, así
+    /// que las luces del teclado se quedan congeladas en la máscara que hubiera
+    /// al arrancar la sesión.
+    ///
+    /// Bajo el backend winit/anidado `input.devices` está vacío, así que esto
+    /// queda en no-op y el compositor anfitrión sigue gobernando los LEDs.
+    fn led_state_changed(&mut self, _seat: &Seat<Self>, led_state: LedState) {
+        let leds: smithay::reexports::input::Led = led_state.into();
+        for device in self.input.devices.iter_mut() {
+            device.led_update(leds);
+        }
     }
 }
 

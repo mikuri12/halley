@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'v*'
+    branches:
+      - dev
   workflow_dispatch:
 
 # Necesario para que el GITHUB_TOKEN pueda crear releases y subir assets.
