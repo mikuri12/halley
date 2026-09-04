@@ -248,6 +248,9 @@ impl Halley {
                 cursor_manager: crate::render::CursorManager::default(),
                 dmabuf_importer: None,
                 dmabuf_output_feedbacks: HashMap::new(),
+                foreign_toplevel_list_state:
+                    smithay::wayland::foreign_toplevel_list::ForeignToplevelListState::new::<Halley>(dh),
+                foreign_toplevel_handles: HashMap::new(),
             },
             model: ModelState {
                 carry_state: CarryState {

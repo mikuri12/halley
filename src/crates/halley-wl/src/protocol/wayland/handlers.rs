@@ -336,3 +336,11 @@ impl DataControlHandler for Halley {
 }
 
 delegate_data_control!(Halley);
+ 
+impl smithay::wayland::foreign_toplevel_list::ForeignToplevelListHandler for Halley {
+    fn foreign_toplevel_list_state(
+        &mut self,
+    ) -> &mut smithay::wayland::foreign_toplevel_list::ForeignToplevelListState {
+        &mut self.platform.foreign_toplevel_list_state
+    }
+}

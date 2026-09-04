@@ -83,7 +83,7 @@ fn compact_app_id_label(app_id: &str) -> Option<String> {
     Some(out.trim().to_string()).filter(|value| !value.is_empty())
 }
 
-fn surface_identity(surface: &WlSurface) -> (Option<String>, Option<String>) {
+pub(crate) fn surface_identity(surface: &WlSurface) -> (Option<String>, Option<String>) {
     with_states(surface, |states| {
         states
             .data_map

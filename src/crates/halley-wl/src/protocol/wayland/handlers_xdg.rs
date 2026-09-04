@@ -290,6 +290,16 @@ impl XdgShellHandler for Halley {
         } else if handled_by_lift_staging {
             self.request_maintenance();
         }
+
+        let (title, app_id) =
+            crate::compositor::workspace::lifecycle::surface::surface_identity(toplevel.wl_surface());
+        let foreign_handle = self.platform.foreign_toplevel_list_state.new_toplevel::<Halley>(
+            title.unwrap_or_default(),
+            app_id.unwrap_or_default(),
+        );
+        self.platform
+            .foreign_toplevel_handles
+            .insert(toplevel.wl_surface().id(), foreign_handle);
     }
 
     fn app_id_changed(&mut self, surface: ToplevelSurface) {
@@ -298,6 +308,13 @@ impl XdgShellHandler for Halley {
             surface.wl_surface(),
             "Window",
         );
+        let wl_id = surface.wl_surface().id();
+        if let Some(handle) = self.platform.foreign_toplevel_handles.get(&wl_id) {
+            let (_, app_id) =
+                crate::compositor::workspace::lifecycle::surface::surface_identity(surface.wl_surface());
+            handle.send_app_id(&app_id.unwrap_or_default());
+            handle.send_done();
+        }
     }
 
     fn title_changed(&mut self, surface: ToplevelSurface) {
@@ -306,6 +323,13 @@ impl XdgShellHandler for Halley {
             surface.wl_surface(),
             "Window",
         );
+        let wl_id = surface.wl_surface().id();
+        if let Some(handle) = self.platform.foreign_toplevel_handles.get(&wl_id) {
+            let (title, _) =
+                crate::compositor::workspace::lifecycle::surface::surface_identity(surface.wl_surface());
+            handle.send_title(&title.unwrap_or_default());
+            handle.send_done();
+        }
     }
 
     fn new_popup(&mut self, popup: PopupSurface, positioner: PositionerState) {
@@ -543,6 +567,10 @@ impl XdgShellHandler for Halley {
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
+        let wl_id = surface.wl_surface().id();
+        if let Some(handle) = self.platform.foreign_toplevel_handles.remove(&wl_id) {
+            handle.send_closed();
+        }
         workspace::lifecycle::on_toplevel_destroyed(&mut self.surface_lifecycle_ctx(), surface);
     }
 }

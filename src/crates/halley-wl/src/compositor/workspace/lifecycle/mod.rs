@@ -17,7 +17,7 @@ use crate::compositor::spawn::rules::InitialWindowIntent;
 use crate::window::CloseAnimationLayer;
 
 mod cleanup;
-mod surface;
+pub(crate) mod surface;
 
 use cleanup::{
     arm_queued_overflow_promotion, capture_queued_overflow_promotion, drop_surface_impl,

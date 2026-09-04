@@ -17,6 +17,8 @@ export XDG_SESSION_TYPE=wayland
 export XDG_CURRENT_DESKTOP=Halley
 export XDG_SESSION_DESKTOP=Halley
 export DESKTOP_SESSION=Halley
+export SWAYSOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/halley/sway.sock"
+export I3SOCK="$SWAYSOCK"
 
 export RUST_BACKTRACE=full
 export RUST_LOG=info

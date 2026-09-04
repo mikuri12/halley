@@ -22,6 +22,7 @@ use smithay::{
         cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufFeedback, DmabufFeedbackBuilder, DmabufGlobal, DmabufState},
         drm_syncobj::{DrmSyncPoint, DrmSyncobjCachedState, DrmSyncobjState},
+        foreign_toplevel_list::{ForeignToplevelHandle, ForeignToplevelListState},
         fractional_scale::{FractionalScaleManagerState, with_fractional_scale},
         idle_notify::IdleNotifierState,
         output::OutputManagerState,
@@ -86,6 +87,8 @@ pub(crate) struct PlatformState {
     pub(crate) cursor_manager: CursorManager,
     pub(crate) dmabuf_importer: Option<Rc<dyn DmabufImportBackend>>,
     pub(crate) dmabuf_output_feedbacks: HashMap<String, DmabufFeedback>,
+    pub(crate) foreign_toplevel_list_state: ForeignToplevelListState,
+    pub(crate) foreign_toplevel_handles: HashMap<ObjectId, ForeignToplevelHandle>,
 }
 
 pub(crate) fn preferred_xdg_decoration_mode(st: &Halley) -> XdgDecorationMode {
