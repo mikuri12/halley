@@ -65,6 +65,7 @@ mod handlers_xdg;
 pub(crate) mod portal;
 mod screencopy;
 pub(crate) mod session_lock;
+pub(crate) mod wlr_foreign_toplevel;
 
 pub use client_state::ClientState;
 

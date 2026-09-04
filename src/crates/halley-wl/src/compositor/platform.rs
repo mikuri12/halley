@@ -89,6 +89,8 @@ pub(crate) struct PlatformState {
     pub(crate) dmabuf_output_feedbacks: HashMap<String, DmabufFeedback>,
     pub(crate) foreign_toplevel_list_state: ForeignToplevelListState,
     pub(crate) foreign_toplevel_handles: HashMap<ObjectId, ForeignToplevelHandle>,
+    pub(crate) wlr_foreign_toplevel_state: crate::protocol::wayland::wlr_foreign_toplevel::WlrForeignToplevelState,
+    pub(crate) wlr_foreign_toplevel_handles: HashMap<ObjectId, crate::protocol::wayland::wlr_foreign_toplevel::WlrForeignToplevelHandle>,
 }
 
 pub(crate) fn preferred_xdg_decoration_mode(st: &Halley) -> XdgDecorationMode {

@@ -251,6 +251,9 @@ impl Halley {
                 foreign_toplevel_list_state:
                     smithay::wayland::foreign_toplevel_list::ForeignToplevelListState::new::<Halley>(dh),
                 foreign_toplevel_handles: HashMap::new(),
+                wlr_foreign_toplevel_state:
+                    crate::protocol::wayland::wlr_foreign_toplevel::WlrForeignToplevelState::new(dh),
+                wlr_foreign_toplevel_handles: HashMap::new(),
             },
             model: ModelState {
                 carry_state: CarryState {

@@ -294,12 +294,29 @@ impl XdgShellHandler for Halley {
         let (title, app_id) =
             crate::compositor::workspace::lifecycle::surface::surface_identity(toplevel.wl_surface());
         let foreign_handle = self.platform.foreign_toplevel_list_state.new_toplevel::<Halley>(
-            title.unwrap_or_default(),
-            app_id.unwrap_or_default(),
+            title.clone().unwrap_or_default(),
+            app_id.clone().unwrap_or_default(),
         );
         self.platform
             .foreign_toplevel_handles
             .insert(toplevel.wl_surface().id(), foreign_handle);
+
+        let is_active = self
+            .platform
+            .seat
+            .get_keyboard()
+            .and_then(|kb| kb.current_focus())
+            .map(|s| s.id() == toplevel.wl_surface().id())
+            .unwrap_or(false);
+        let wlr_handle = self.platform.wlr_foreign_toplevel_state.new_toplevel(
+            toplevel.wl_surface().clone(),
+            title.unwrap_or_default(),
+            app_id.unwrap_or_default(),
+            is_active,
+        );
+        self.platform
+            .wlr_foreign_toplevel_handles
+            .insert(toplevel.wl_surface().id(), wlr_handle);
     }
 
     fn app_id_changed(&mut self, surface: ToplevelSurface) {
@@ -309,10 +326,15 @@ impl XdgShellHandler for Halley {
             "Window",
         );
         let wl_id = surface.wl_surface().id();
+        let (_, app_id) =
+            crate::compositor::workspace::lifecycle::surface::surface_identity(surface.wl_surface());
+        let app_id_str = app_id.unwrap_or_default();
         if let Some(handle) = self.platform.foreign_toplevel_handles.get(&wl_id) {
-            let (_, app_id) =
-                crate::compositor::workspace::lifecycle::surface::surface_identity(surface.wl_surface());
-            handle.send_app_id(&app_id.unwrap_or_default());
+            handle.send_app_id(&app_id_str);
+            handle.send_done();
+        }
+        if let Some(handle) = self.platform.wlr_foreign_toplevel_handles.get(&wl_id) {
+            handle.send_app_id(&app_id_str);
             handle.send_done();
         }
     }
@@ -324,10 +346,15 @@ impl XdgShellHandler for Halley {
             "Window",
         );
         let wl_id = surface.wl_surface().id();
+        let (title, _) =
+            crate::compositor::workspace::lifecycle::surface::surface_identity(surface.wl_surface());
+        let title_str = title.unwrap_or_default();
         if let Some(handle) = self.platform.foreign_toplevel_handles.get(&wl_id) {
-            let (title, _) =
-                crate::compositor::workspace::lifecycle::surface::surface_identity(surface.wl_surface());
-            handle.send_title(&title.unwrap_or_default());
+            handle.send_title(&title_str);
+            handle.send_done();
+        }
+        if let Some(handle) = self.platform.wlr_foreign_toplevel_handles.get(&wl_id) {
+            handle.send_title(&title_str);
             handle.send_done();
         }
     }
@@ -571,6 +598,10 @@ impl XdgShellHandler for Halley {
         if let Some(handle) = self.platform.foreign_toplevel_handles.remove(&wl_id) {
             handle.send_closed();
         }
+        if let Some(handle) = self.platform.wlr_foreign_toplevel_handles.remove(&wl_id) {
+            handle.send_closed();
+        }
+        self.platform.wlr_foreign_toplevel_state.remove_toplevel(&wl_id);
         workspace::lifecycle::on_toplevel_destroyed(&mut self.surface_lifecycle_ctx(), surface);
     }
 }
