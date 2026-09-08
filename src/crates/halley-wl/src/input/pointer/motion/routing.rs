@@ -54,6 +54,7 @@ pub(super) fn compute_motion_routing(
         .and_then(|_| st.input.interaction_state.grabbed_layer_surface.clone())
         .filter(|surface| {
             crate::compositor::monitor::layer_shell::is_layer_surface_tree(st, surface)
+                && !crate::compositor::layer_window::is_promoted_layer_surface(st, surface)
         });
 
     let drag_state = ps.drag.map(|drag| {
@@ -225,6 +226,7 @@ pub(super) fn dispatch_pointer_motion(
             .and_then(|_| st.input.interaction_state.grabbed_layer_surface.clone())
             .filter(|surface| {
                 crate::compositor::monitor::layer_shell::is_layer_surface_tree(st, surface)
+                    && !crate::compositor::layer_window::is_promoted_layer_surface(st, surface)
             });
 
         let resize_preview = ps.resize;
@@ -322,7 +324,9 @@ pub(super) fn dispatch_pointer_motion(
             pointer.current_location()
         } else if bypass_spatial_camera
             || focus.as_ref().is_some_and(|(surface, _)| {
-                crate::compositor::monitor::layer_shell::is_layer_surface_tree(st, surface)
+                // Layer promovida = nodo del Field: coords por cámara lógica.
+                (crate::compositor::monitor::layer_shell::is_layer_surface_tree(st, surface)
+                    && !crate::compositor::layer_window::is_promoted_layer_surface(st, surface))
                     || crate::protocol::wayland::session_lock::is_session_lock_surface(st, surface)
             })
         {

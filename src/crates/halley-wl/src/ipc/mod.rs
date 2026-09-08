@@ -1,4 +1,5 @@
 mod cluster;
+mod layer;
 mod monitor;
 mod node;
 mod trail;
@@ -18,6 +19,7 @@ use crate::compositor::root::Halley;
 use crate::compositor::screenshot;
 
 use self::cluster::handle_cluster_request;
+use self::layer::handle_layer_request;
 use self::monitor::handle_monitor_request;
 use self::node::handle_node_request;
 use self::trail::handle_trail_request;
@@ -49,6 +51,7 @@ pub(crate) fn handle_request_with_fds(
         Request::Tile(request) => handle_tile_request(st, request),
         Request::Cluster(request) => handle_cluster_request(st, request),
         Request::PortalScreenCast(request) => handle_portal_screencast_request(st, request, fds),
+        Request::Layer(request) => handle_layer_request(st, request),
         Request::Compositor(CompositorRequest::Outputs) => Response::Error(ApiError::Unsupported(
             "outputs are handled by the ipc listener".into(),
         )),
@@ -859,6 +862,76 @@ mod tests {
                 slot: 1,
                 output: None,
             }),
+        );
+
+        assert!(matches!(response, Response::Error(ApiError::NotFound(_))));
+    }
+
+    #[test]
+    fn layer_list_reports_group_per_output_without_surfaces() {
+        let tuning = halley_config::RuntimeTuning::default();
+        let dh = smithay::reexports::wayland_server::Display::<Halley>::new()
+            .expect("display")
+            .handle();
+        let mut state = Halley::new_for_test(&dh, tuning);
+
+        let response = handle_request(
+            &mut state,
+            halley_api::Request::Layer(halley_api::LayerRequest::List { output: None }),
+        );
+
+        let Response::LayerList(list) = response else {
+            panic!("expected LayerList response, got {response:?}");
+        };
+        assert!(!list.outputs.is_empty());
+        assert!(list.outputs.iter().all(|group| group.layers.is_empty()));
+    }
+
+    #[test]
+    fn layer_list_validates_requested_output() {
+        let tuning = halley_config::RuntimeTuning::default();
+        let dh = smithay::reexports::wayland_server::Display::<Halley>::new()
+            .expect("display")
+            .handle();
+        let mut state = Halley::new_for_test(&dh, tuning);
+
+        let response = handle_request(
+            &mut state,
+            halley_api::Request::Layer(halley_api::LayerRequest::List {
+                output: Some("no-such-output".to_string()),
+            }),
+        );
+
+        assert!(matches!(response, Response::Error(ApiError::NotFound(_))));
+    }
+
+    #[test]
+    fn layer_promote_unknown_handle_returns_not_found() {
+        let tuning = halley_config::RuntimeTuning::default();
+        let dh = smithay::reexports::wayland_server::Display::<Halley>::new()
+            .expect("display")
+            .handle();
+        let mut state = Halley::new_for_test(&dh, tuning);
+
+        let response = handle_request(
+            &mut state,
+            halley_api::Request::Layer(halley_api::LayerRequest::Promote { handle: 42 }),
+        );
+
+        assert!(matches!(response, Response::Error(ApiError::NotFound(_))));
+    }
+
+    #[test]
+    fn layer_demote_unknown_handle_returns_not_found() {
+        let tuning = halley_config::RuntimeTuning::default();
+        let dh = smithay::reexports::wayland_server::Display::<Halley>::new()
+            .expect("display")
+            .handle();
+        let mut state = Halley::new_for_test(&dh, tuning);
+
+        let response = handle_request(
+            &mut state,
+            halley_api::Request::Layer(halley_api::LayerRequest::Demote { handle: 42 }),
         );
 
         assert!(matches!(response, Response::Error(ApiError::NotFound(_))));

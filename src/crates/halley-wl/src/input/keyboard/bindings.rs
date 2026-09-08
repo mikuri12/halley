@@ -249,6 +249,7 @@ pub(crate) fn apply_compositor_action_press(
         CompositorBindingAction::CloseFocusedWindow => request_close_focused_toplevel(st),
         CompositorBindingAction::ClusterMode => st.enter_cluster_mode(),
         CompositorBindingAction::Apogee => st.toggle_apogee(Instant::now()),
+        CompositorBindingAction::ToggleWidgetFloating => toggle_widget_floating(st),
         CompositorBindingAction::FocusCycle(direction) => {
             st.start_or_step_focus_cycle(direction, Instant::now())
         }
@@ -379,6 +380,87 @@ fn center_on_last_focused(st: &mut Halley) -> bool {
     st.animate_viewport_center_to(pos, now)
 }
 
+/// Toggle "widget flotante": convierte el widget layer-shell bajo el puntero
+/// (panel, OSD, widget de escritorio) en una ventana del Field, o lo devuelve
+/// a su capa si ya está promovido. Resolución del objetivo, en orden:
+///
+/// 1. Nodo promovido bajo el puntero → demote (vuelve a ser layer).
+/// 2. Layer bajo el puntero (que no sea un shield/backdrop fullscreen) →
+///    promote.
+/// 3. La layer con foco de teclado (p. ej. un panel recién abierto sin mover
+///    el puntero) → promote.
+///
+/// Así un mismo atajo (Super+Shift+Q) flota/desflota cualquier widget, y varios
+/// widgets pueden coexistir como ventanas siempre que el shell los mantenga
+/// abiertos (los widgets de escritorio de Noctalia siempre coexisten; los
+/// paneles depende del shell).
+fn toggle_widget_floating(st: &mut Halley) -> bool {
+    let now = Instant::now();
+    if let Some((sx, sy)) = st.input.interaction_state.last_pointer_screen_global {
+        let monitor = st.monitor_for_screen_or_interaction(sx, sy);
+        st.activate_monitor(monitor.as_str());
+        let (ws_w, ws_h, local_sx, local_sy) =
+            st.local_screen_in_monitor(monitor.as_str(), sx, sy);
+
+        // 1) Nodo promovido bajo el puntero: devolverlo a su capa.
+        if let Some((surface, _)) =
+            crate::input::pointer::focus::promoted_layer_node_focus_for_screen(
+                st, ws_w, ws_h, local_sx, local_sy, now, None,
+            )
+        {
+            let root =
+                crate::compositor::monitor::layer_shell::layer_surface_root_for_surface(st, &surface)
+                    .unwrap_or_else(|| surface.clone());
+            if crate::compositor::layer_window::demote_layer_surface_node(st, &root).is_some() {
+                debug!("widget floating toggle: demoted layer node back to layer");
+                return true;
+            }
+        }
+
+        // 2) Layer bajo el puntero: promoverla a ventana (los shields no son
+        //    widgets: click-through).
+        if let Some((surface, _)) =
+            crate::input::pointer::focus::layer_surface_focus_for_screen(
+                st, ws_w, ws_h, local_sx, local_sy, now, None,
+            )
+        {
+            let root =
+                crate::compositor::monitor::layer_shell::layer_surface_root_for_surface(st, &surface)
+                    .unwrap_or_else(|| surface.clone());
+            if !crate::compositor::layer_window::layer_resembles_fullscreen_shield(st, &root)
+                && !crate::compositor::layer_window::is_promoted_layer_surface(st, &root)
+            {
+                let node =
+                    crate::compositor::layer_window::promote_layer_surface_to_node(st, &root);
+                debug!("widget floating toggle: promoted layer surface to node {}", node);
+                return true;
+            }
+        }
+    }
+
+    // 3) Fallback: la layer con foco de teclado.
+    if let Some(focus_id) = st.model.monitor_state.layer_keyboard_focus.clone() {
+        if let Some(surface) = st
+            .platform
+            .wlr_layer_shell_state
+            .layer_surfaces()
+            .find(|layer| {
+                use smithay::reexports::wayland_server::Resource;
+                layer.wl_surface().id() == focus_id
+            })
+            .map(|layer| layer.wl_surface().clone())
+        {
+            if !crate::compositor::layer_window::is_promoted_layer_surface(st, &surface) {
+                let node = crate::compositor::layer_window::promote_layer_surface_to_node(st, &surface);
+                debug!("widget floating toggle: promoted keyboard-focused layer to node {}", node);
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 fn apogee_allows_compositor_action(action: &CompositorBindingAction) -> bool {
     matches!(
         action,
@@ -421,6 +503,7 @@ pub(crate) fn apply_bound_key(
             | CompositorBindingAction::ClusterMode
             | CompositorBindingAction::Apogee
             | CompositorBindingAction::CenterLastFocused
+            | CompositorBindingAction::ToggleWidgetFloating
             | CompositorBindingAction::FocusCycle(_)
             | CompositorBindingAction::Stack(_)
             | CompositorBindingAction::Tile(_)

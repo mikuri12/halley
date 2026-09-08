@@ -970,6 +970,9 @@ keybinds:
   "$var.mod+f" "toggle-fullscreen"
   "$var.mod+p" "toggle-focused-pin"
   "$var.mod+q" "close-focused"
+  # Float/unfloat the shell widget under the pointer (panel, desktop widget)
+  # as a regular Field window, and back.
+  "$var.mod+shift+q" "toggle-widget-floating"
 
   # Zoom controls for the field camera.
   "$var.mod+mousewheelup" "zoom-in"

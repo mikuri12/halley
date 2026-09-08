@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ApiError;
 use crate::types::{
-    BearingsStatusResponse, ClusterDraftRequest, ClusterInfo, ClusterListResponse, NodeInfo,
-    NodeListResponse, OutputsResponse, TrailListResponse,
+    BearingsStatusResponse, ClusterDraftRequest, ClusterInfo, ClusterListResponse,
+    LayerListResponse, NodeInfo, NodeListResponse, OutputsResponse, TrailListResponse,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -421,6 +421,19 @@ pub enum MonitorRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum LayerRequest {
+    List {
+        output: Option<String>,
+    },
+    Promote {
+        handle: u64,
+    },
+    Demote {
+        handle: u64,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Request {
     Compositor(CompositorRequest),
     Capture(CaptureRequest),
@@ -432,6 +445,8 @@ pub enum Request {
     Tile(TileRequest),
     Cluster(ClusterRequest),
     PortalScreenCast(PortalScreenCastRequest),
+    // Añadir variantes NUEVAS al final — ver la nota en `Response`.
+    Layer(LayerRequest),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -451,4 +466,9 @@ pub enum Response {
     Version(crate::types::VersionInfo),
     GamescopeTarget(crate::types::GamescopeTargetResponse),
     PortalScreenCast(PortalScreenCastResponse),
+    // Añadir variantes NUEVAS al final: el códec binario codifica el índice de
+    // la variante, así que insertar a mitad rompe la decodificación contra
+    // pares con una versión anterior del protocolo.
+    LayerList(LayerListResponse),
+    LayerPromoted(crate::types::LayerPromoteResponse),
 }

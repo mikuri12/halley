@@ -438,6 +438,16 @@ fn apply_explicit_binding(
                 CompositorBindingAction::CenterLastFocused,
             );
         }
+        "toggle_widget_floating" | "toggle-widget-floating" | "float_widget" | "float-widget"
+        | "widget_floating" | "widget-floating" => {
+            upsert_compositor_binding(
+                out,
+                CompositorBindingScope::Global,
+                mods,
+                key,
+                CompositorBindingAction::ToggleWidgetFloating,
+            );
+        }
         "move_window" | "move-window" if is_pointer_button_code(key) => {
             upsert_pointer_binding(out, mods, key, PointerBindingAction::MoveWindow);
         }
@@ -914,6 +924,20 @@ end
         assert!(out.compositor_bindings.iter().any(|binding| {
             binding.scope == CompositorBindingScope::Field
                 && binding.action == CompositorBindingAction::ToggleFocusedPin
+        }));
+    }
+
+    #[test]
+    fn widget_floating_keyword_parses_as_global_action() {
+        let mut out = RuntimeTuning::default();
+        out.compositor_bindings.clear();
+
+        let bindings = vec![("mod+shift+q".to_string(), "toggle-widget-floating".to_string())];
+        assert!(apply_explicit_keybind_overrides_entries(&bindings, &mut out).is_ok());
+
+        assert!(out.compositor_bindings.iter().any(|binding| {
+            binding.scope == CompositorBindingScope::Global
+                && binding.action == CompositorBindingAction::ToggleWidgetFloating
         }));
     }
 }

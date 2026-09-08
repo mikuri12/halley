@@ -114,6 +114,16 @@ pub(super) fn refresh_node_identity_for_surface(
     };
 
     let (title, app_id) = surface_identity(&root_surface);
+    // Layer promovida a nodo: sin datos de rol xdg; conserva la identidad
+    // derivada del namespace (ver `compositor::layer_window`).
+    let (title, app_id) = if title.is_none() && app_id.is_none() {
+        match crate::compositor::layer_window::layer_surface_identity(st, &root_key) {
+            Some(identity) => identity,
+            None => (title, app_id),
+        }
+    } else {
+        (title, app_id)
+    };
     let label = title
         .or_else(|| app_id.as_deref().and_then(compact_app_id_label))
         .unwrap_or_else(|| fallback_label.to_string());
@@ -537,10 +547,26 @@ pub(super) fn note_commit(st: &mut Halley, surface: &WlSurface, now: Instant) {
                 .current()
                 .geometry
         });
+        // Layer promovida a nodo: sin geometría xdg; el input region (el
+        // contenido sin el padding de sombra del buffer) hace de geometría.
+        let geo = geo.map(|g| (g.loc.x, g.loc.y, g.size.w, g.size.h)).or_else(|| {
+            if !st
+                .model
+                .node_layer_surfaces
+                .contains_key(&node_id)
+            {
+                return None;
+            }
+            crate::compositor::layer_window::layer_surface_content_region(
+                &root_surface,
+                bbox,
+            )
+            .map(|region| (region.loc.x, region.loc.y, region.size.w, region.size.h))
+        });
         let (window_geometry, new_size) = committed_window_geometry(
             (bbox.loc.x, bbox.loc.y),
             (bbox.size.w, bbox.size.h),
-            geo.map(|g| (g.loc.x, g.loc.y, g.size.w, g.size.h)),
+            geo,
         );
         let first_geometry_commit = !st
             .ui

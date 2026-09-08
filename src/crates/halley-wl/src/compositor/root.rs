@@ -13,7 +13,7 @@ use smithay::{
     delegate_dmabuf,
     desktop::PopupManager,
     input::SeatState,
-    reexports::wayland_server::{DisplayHandle, backend::ObjectId},
+    reexports::wayland_server::{DisplayHandle, backend::ObjectId, protocol::wl_surface::WlSurface},
     wayland::{
         background_effect::BackgroundEffectState,
         compositor::CompositorState,
@@ -69,6 +69,11 @@ pub(crate) struct ModelState {
     pub(crate) camera_target_center: Vec2,
     pub(crate) camera_target_view_size: Vec2,
     pub(crate) surface_to_node: HashMap<ObjectId, NodeId>,
+    /// Superficies layer-shell promovidas a nodo: node → wl_surface raíz. Una
+    /// layer está promovida exactamente cuando su ObjectId vive en
+    /// `surface_to_node`; este mapa es el inverso para lookup node→surface
+    /// (render, foco de teclado/puntero). Ver `compositor::layer_window`.
+    pub(crate) node_layer_surfaces: HashMap<NodeId, WlSurface>,
     pub(crate) node_app_ids: HashMap<NodeId, String>,
     /// For window-parented popups that should stay anchored to the monitor while
     /// still following camera zoom (e.g. Steam's install-complete notification),
@@ -281,6 +286,8 @@ impl Halley {
                     layer_surface_committed: HashSet::new(),
                     layer_surface_last_configured_size: HashMap::new(),
                     layer_keyboard_focus: None,
+                    layer_surface_handles: HashMap::new(),
+                    next_layer_surface_handle: 1,
                 },
                 focus_state: FocusState {
                     interaction_focus_until_ms: 0,
@@ -369,6 +376,7 @@ impl Halley {
                 camera_target_center: primary_viewport.center,
                 camera_target_view_size: primary_zoom_ref,
                 surface_to_node: HashMap::new(),
+                node_layer_surfaces: HashMap::new(),
                 node_app_ids: HashMap::new(),
                 pinned_popup_anchor: HashMap::new(),
             },

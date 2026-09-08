@@ -15,15 +15,21 @@ use print::print_response;
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match parse_request(&args) {
-        Ok(ParseOutcome::Request(request)) => match send_request(&request) {
-            Ok(response) => {
-                let original_request = request.clone();
-                if version_request_rejected_by_old_compositor(&original_request, &response) {
-                    eprintln!(
-                        "halleyctl failed: the running Halley compositor does not support -V/--version yet; restart Halley after updating"
-                    );
-                    std::process::exit(1);
-                }
+            Ok(ParseOutcome::Request(request)) => match send_request(&request) {
+                Ok(response) => {
+                    let original_request = request.clone();
+                    if version_request_rejected_by_old_compositor(&original_request, &response) {
+                        eprintln!(
+                            "halleyctl failed: the running Halley compositor does not support -V/--version yet; restart Halley after updating"
+                        );
+                        std::process::exit(1);
+                    }
+                    if layer_request_rejected_by_old_compositor(&original_request, &response) {
+                        eprintln!(
+                            "halleyctl failed: the running Halley compositor does not support layer commands yet; restart Halley after updating"
+                        );
+                        std::process::exit(1);
+                    }
                 if let Err(err) = print_response(response.clone()) {
                     eprintln!("halleyctl failed: {err}");
                     std::process::exit(1);
@@ -46,6 +52,12 @@ fn main() {
                     );
                     std::process::exit(1);
                 }
+                if is_layer_request(&request) && matches!(err, halley_ipc::CodecError::Decode(_)) {
+                    eprintln!(
+                        "halleyctl failed: the running Halley compositor does not support layer commands yet; restart Halley after updating"
+                    );
+                    std::process::exit(1);
+                }
                 eprintln!("halleyctl failed to talk to halley: {err}");
                 std::process::exit(1);
             }
@@ -59,6 +71,19 @@ fn main() {
 
 fn is_version_request(request: &Request) -> bool {
     matches!(request, Request::Compositor(CompositorRequest::Version))
+}
+
+fn is_layer_request(request: &Request) -> bool {
+    matches!(request, Request::Layer(_))
+}
+
+fn layer_request_rejected_by_old_compositor(request: &Request, response: &Response) -> bool {
+    is_layer_request(request)
+        && matches!(
+            response,
+            Response::Error(ApiError::InvalidRequest(message))
+                if message.contains("decode error") || message.contains("deserial")
+        )
 }
 
 fn version_request_rejected_by_old_compositor(request: &Request, response: &Response) -> bool {

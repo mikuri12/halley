@@ -56,7 +56,8 @@ pub fn wl_surface_for_node(st: &Halley, id: NodeId) -> Option<WlSurface> {
             return Some(wl);
         }
     }
-    None
+    // Layer-shell promovida a nodo (ver `compositor::layer_window`).
+    st.model.node_layer_surfaces.get(&id).cloned()
 }
 
 fn keep_locked_focus_for_request(

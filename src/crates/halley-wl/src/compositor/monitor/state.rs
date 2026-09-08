@@ -65,6 +65,11 @@ pub(crate) struct MonitorState {
     pub(crate) layer_surface_committed: HashSet<ObjectId>,
     pub(crate) layer_surface_last_configured_size: HashMap<ObjectId, Size<i32, Logical>>,
     pub(crate) layer_keyboard_focus: Option<ObjectId>,
+    /// Handle estable (u64) por superficie layer-shell, asignado al registrarla.
+    /// Los ObjectId de wayland no son serializables para el IPC; este handle es
+    /// el selector público de la superficie (p. ej. `halleyctl layer promote`).
+    pub(crate) layer_surface_handles: HashMap<ObjectId, u64>,
+    pub(crate) next_layer_surface_handle: u64,
 }
 
 fn preferred_monitor_name(monitors: &HashMap<String, MonitorSpace>) -> Option<String> {
