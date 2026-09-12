@@ -56,7 +56,10 @@ jobs:
 
       - name: Package binaries
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          # Los nombres de rama pueden contener '/': se sanea para que el
+          # nombre del tarball (y del template) sea un nombre de fichero
+          # valido. Tags y 'dev' no cambian.
+          TAG="${GITHUB_REF_NAME//\//-}"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           TARBALL="halley-binaries-${TAG}-x86_64.tar.gz"
           echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
