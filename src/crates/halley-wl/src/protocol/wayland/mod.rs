@@ -6,7 +6,7 @@ use smithay::{
     backend::allocator::dmabuf::Dmabuf,
     backend::renderer::utils::on_commit_buffer_handler,
     delegate_background_effect, delegate_compositor, delegate_cursor_shape, delegate_data_control,
-    delegate_data_device, delegate_dmabuf, delegate_drm_syncobj, delegate_fractional_scale,
+    delegate_data_device, delegate_dmabuf, delegate_drm_syncobj, delegate_foreign_toplevel_list, delegate_fractional_scale,
     delegate_idle_notify, delegate_layer_shell, delegate_output, delegate_pointer_constraints,
     delegate_pointer_gestures, delegate_presentation, delegate_primary_selection,
     delegate_relative_pointer, delegate_seat, delegate_shm, delegate_viewporter,
@@ -65,8 +65,10 @@ mod handlers_xdg;
 pub(crate) mod portal;
 mod screencopy;
 pub(crate) mod session_lock;
+pub(crate) mod wlr_foreign_toplevel;
 
 pub use client_state::ClientState;
 
 delegate_presentation!(Halley);
 delegate_fractional_scale!(Halley);
+delegate_foreign_toplevel_list!(Halley);

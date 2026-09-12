@@ -260,13 +260,15 @@ fn pointer_focus_at_last_screen(
         resize_preview,
     );
     let location = if focus.as_ref().is_some_and(|(surface, _)| {
-        crate::compositor::monitor::layer_shell::is_layer_surface_tree(st, surface)
+        (crate::compositor::monitor::layer_shell::is_layer_surface_tree(st, surface)
+            && !crate::compositor::layer_window::is_promoted_layer_surface(st, surface))
             || crate::protocol::wayland::session_lock::is_session_lock_surface(st, surface)
     }) {
         (local_sx as f64, local_sy as f64).into()
     } else {
         let cam_scale = st.camera_render_scale() as f64;
-        (local_sx as f64 / cam_scale, local_sy as f64 / cam_scale).into()
+        (local_sx as f64 / cam_scale, local_sy as f64 / cam_scale)
+            .into()
     };
     let contents = pointer_contents_for_focus(st, monitor, focus.as_ref());
     Some((focus, location, contents))

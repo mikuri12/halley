@@ -248,6 +248,68 @@ pub struct NodeListResponse {
     pub outputs: Vec<NodeOutputGroup>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum LayerShellKind {
+    Background,
+    Bottom,
+    Top,
+    Overlay,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum LayerKeyboardInteractivity {
+    None,
+    OnDemand,
+    Exclusive,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum LayerAnchorEdge {
+    Top,
+    Bottom,
+    Left,
+    Right,
+}
+
+/// Estado de una superficie layer-shell (wlr-layer-shell) visible para el IPC.
+/// `id` es un handle interno estable asignado al registrar la superficie; sirve
+/// de selector para comandos posteriores (p. ej. promoverla a nodo).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayerInfo {
+    pub id: u64,
+    pub namespace: Option<String>,
+    pub output: Option<String>,
+    pub layer: LayerShellKind,
+    pub anchor: Vec<LayerAnchorEdge>,
+    /// None = no reserva zona exclusiva (DontCare).
+    pub exclusive_zone: Option<i32>,
+    pub keyboard_interactivity: LayerKeyboardInteractivity,
+    pub keyboard_focus: bool,
+    pub committed: bool,
+    /// Nodo del Field si la superficie está promovida a ventana.
+    pub promoted_node: Option<u64>,
+    pub pos_x: i32,
+    pub pos_y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayerOutputGroup {
+    pub output: String,
+    pub layers: Vec<LayerInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayerListResponse {
+    pub outputs: Vec<LayerOutputGroup>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayerPromoteResponse {
+    pub node_id: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrailEntryInfo {
     pub index: usize,

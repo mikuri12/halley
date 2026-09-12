@@ -19,7 +19,7 @@ use smithay::utils::SERIAL_COUNTER;
 
 use super::focus::{
     grabbed_layer_surface_focus, layer_surface_focus_for_screen, pointer_focus_for_screen,
-    popup_focus_for_screen,
+    popup_focus_for_screen, promoted_layer_node_focus_for_screen,
 };
 use super::portal_chooser::handle_portal_chooser_pointer_button;
 use super::screenshot::handle_screenshot_pointer_button;
@@ -127,7 +127,15 @@ pub(crate) fn handle_pointer_button_input<B: BackendView>(
         ctx.backend.request_redraw();
         return;
     }
-    let layer_focus = layer_surface_focus_for_screen(
+    // Layer promovida bajo el puntero: se trata como NODO. El foco real lo
+    // resuelve `pointer_focus_for_screen` en el dispatch (que ya prefieres
+    // nodos promovidos sobre layers). Si dejáramos que
+    // `layer_surface_focus_for_screen` corriera igual, el click-shield del
+    // shell (una layer fullscreen invisible del mismo cliente) ganaría el
+    // hit-test: latchearía el monitor de spawn como layer-press, el grab
+    // de layer se tragaría el botón y el RELEASE caería en el shield —
+    // Noctalia interpreta ese click como "cerrar el panel".
+    let promoted_node_under_pointer = promoted_layer_node_focus_for_screen(
         st,
         local_w,
         local_h,
@@ -136,6 +144,19 @@ pub(crate) fn handle_pointer_button_input<B: BackendView>(
         Instant::now(),
         ps.resize,
     );
+    let layer_focus = if promoted_node_under_pointer.is_some() {
+        None
+    } else {
+        layer_surface_focus_for_screen(
+            st,
+            local_w,
+            local_h,
+            local_sx,
+            local_sy,
+            Instant::now(),
+            ps.resize,
+        )
+    };
     let popup_focus = popup_focus_for_screen(
         st,
         local_w,
@@ -763,7 +784,10 @@ pub(super) fn dispatch_pointer_button(
         .grabbed_layer_surface
         .clone()
         .filter(|surface| {
+            // Una layer promovida nunca es el "grab" de layer: es un nodo y
+            // su input va por el hit-test del Field, no por placements.
             crate::compositor::monitor::layer_shell::is_layer_surface_tree(st, surface)
+                && !crate::compositor::layer_window::is_promoted_layer_surface(st, surface)
         });
     let layer_press = matches!(button_state, smithay::backend::input::ButtonState::Pressed)
         && grabbed_layer_surface.is_some();
@@ -816,7 +840,11 @@ pub(super) fn dispatch_pointer_button(
     let location = if locked_surface.is_some() {
         pointer.current_location()
     } else if focus.as_ref().is_some_and(|(surface, _)| {
-        crate::compositor::monitor::layer_shell::is_layer_surface_tree(st, surface)
+        // Una layer promovida es un NODO del Field: sus coords van por la
+        // cámara lógica (escala), igual que cualquier ventana. Solo las
+        // layers NO promovidas usan coords raw de pantalla.
+        (crate::compositor::monitor::layer_shell::is_layer_surface_tree(st, surface)
+            && !crate::compositor::layer_window::is_promoted_layer_surface(st, surface))
             || crate::protocol::wayland::session_lock::is_session_lock_surface(st, surface)
     }) {
         (frame.sx as f64, frame.sy as f64).into()

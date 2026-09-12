@@ -133,7 +133,8 @@ fn focus_pointer_for_client_gesture(st: &mut Halley, target: &GesturePointerTarg
     let Some(focus) = target.focus.clone() else {
         return;
     };
-    let location = if crate::compositor::monitor::layer_shell::is_layer_surface_tree(st, &focus.0)
+    let location = if (crate::compositor::monitor::layer_shell::is_layer_surface_tree(st, &focus.0)
+        && !crate::compositor::layer_window::is_promoted_layer_surface(st, &focus.0))
         || crate::protocol::wayland::session_lock::is_session_lock_surface(st, &focus.0)
     {
         (target.local_sx as f64, target.local_sy as f64).into()

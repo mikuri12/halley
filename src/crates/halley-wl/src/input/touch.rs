@@ -24,7 +24,8 @@ fn touch_focus_for_screen(
     let monitor = st.monitor_for_screen_or_interaction(sx, sy);
     let (ws_w, ws_h, local_sx, local_sy) = st.local_screen_in_monitor(monitor.as_str(), sx, sy);
     let focus = pointer_focus_for_screen(st, ws_w, ws_h, local_sx, local_sy, now, None)?;
-    let location = if crate::compositor::monitor::layer_shell::is_layer_surface_tree(st, &focus.0)
+    let location = if (crate::compositor::monitor::layer_shell::is_layer_surface_tree(st, &focus.0)
+        && !crate::compositor::layer_window::is_promoted_layer_surface(st, &focus.0))
         || crate::protocol::wayland::session_lock::is_session_lock_surface(st, &focus.0)
     {
         (local_sx as f64, local_sy as f64).into()

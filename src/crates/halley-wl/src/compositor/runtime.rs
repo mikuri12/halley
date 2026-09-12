@@ -241,6 +241,7 @@ pub fn apply_tuning(st: &mut Halley, mut tuning: RuntimeTuning) {
     let prev_background = st.runtime.tuning.background.clone();
     let prev_font = st.runtime.tuning.font.clone();
     let prev_input = st.runtime.tuning.input.clone();
+    let prev_dynamic_cursor = st.runtime.tuning.cursor.dynamic.clone();
     let prev_physics_enabled = st.runtime.tuning.physics_enabled;
     let prev_focus = st.last_input_surface_node();
     let previous_output_names: std::collections::HashSet<String> = st
@@ -315,6 +316,14 @@ pub fn apply_tuning(st: &mut Halley, mut tuning: RuntimeTuning) {
     }
 
     st.runtime.tuning = tuning;
+    // Dynamic cursors: reset the simulation when the feature is toggled or
+    // the mode changed so stale velocity samples or stick state do not leak
+    // into the new configuration.
+    if prev_dynamic_cursor.enabled != st.runtime.tuning.cursor.dynamic.enabled
+        || prev_dynamic_cursor.mode != st.runtime.tuning.cursor.dynamic.mode
+    {
+        st.platform.cursor_manager.dynamic_reset();
+    }
     crate::compositor::monitor::layer_shell::refresh_monitor_usable_viewports(st);
     let repeat_changed = st.runtime.tuning.input.repeat_rate != prev_input.repeat_rate
         || st.runtime.tuning.input.repeat_delay != prev_input.repeat_delay;

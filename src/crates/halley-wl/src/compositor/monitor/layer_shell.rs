@@ -19,6 +19,8 @@ use smithay::desktop::{PopupKind, find_popup_root_surface};
 use smithay::wayland::shell::xdg::PopupSurface;
 use smithay::wayland::shell::xdg::PositionerState;
 
+use halley_core::field::NodeId;
+
 const APERTURE_LAYER_NAMESPACE: &str = "halley-aperture";
 const HALLEY_LIFT_LAYER_NAMESPACE: &str = "halley-lift";
 
@@ -395,6 +397,18 @@ fn register_layer_surface_impl(
         .monitor_state
         .layer_surface_namespace
         .insert(surface.wl_surface().id(), namespace.clone());
+    // Handle estable para el IPC: la superficie se registra una sola vez, así que
+    // la asignación solo ocurre en el primer registro.
+    if let std::collections::hash_map::Entry::Vacant(entry) = st
+        .model
+        .monitor_state
+        .layer_surface_handles
+        .entry(surface.wl_surface().id())
+    {
+        let handle = st.model.monitor_state.next_layer_surface_handle;
+        st.model.monitor_state.next_layer_surface_handle += 1;
+        entry.insert(handle);
+    }
     if !st
         .model
         .monitor_state
@@ -471,6 +485,12 @@ fn maybe_grant_layer_surface_focus_on_commit_impl(st: &mut Halley, surface: &WlS
         refresh_monitor_usable_viewports(st);
     }
 
+    // Una layer promovida a nodo no participa en el foco del layer-shell: el
+    // nodo gobierna el foco de teclado (ver `compositor::layer_window`).
+    if st.model.surface_to_node.contains_key(&surface.id()) {
+        return;
+    }
+
     if st.model.monitor_state.layer_keyboard_focus == Some(surface.id()) {
         return;
     }
@@ -493,6 +513,16 @@ fn maybe_grant_layer_surface_focus_on_commit_impl(st: &mut Halley, surface: &WlS
 }
 
 fn remove_layer_surface_impl(st: &mut Halley, surface: &LayerSurface) {
+    // Si la layer estaba promovida a nodo, el nodo muere con el mapa: el
+    // cliente destruyó la superficie (OSD/toast que se cierra, dashboard).
+    if st
+        .model
+        .surface_to_node
+        .contains_key(&surface.wl_surface().id())
+    {
+        crate::compositor::ctx::surface_lifecycle_ctx(st)
+            .drop_surface(surface.wl_surface());
+    }
     let removed_monitor = layer_surface_monitor_name(st, surface.wl_surface());
     let removed_focused_layer =
         st.model.monitor_state.layer_keyboard_focus == Some(surface.wl_surface().id());
@@ -508,6 +538,10 @@ fn remove_layer_surface_impl(st: &mut Halley, surface: &LayerSurface) {
     st.model
         .monitor_state
         .layer_surface_committed
+        .remove(&surface.wl_surface().id());
+    st.model
+        .monitor_state
+        .layer_surface_handles
         .remove(&surface.wl_surface().id());
     st.model
         .monitor_state
@@ -633,13 +667,21 @@ pub(crate) fn configure_layer_shell_surfaces(st: &mut Halley, _output_size: Size
     refresh_monitor_usable_viewports(st);
 }
 
-fn configure_layer_shell_surfaces_for_monitor(st: &mut Halley, monitor_name: &str) {
+pub(crate) fn configure_layer_shell_surfaces_for_monitor(st: &mut Halley, monitor_name: &str) {
     let output_size = layer_output_size_for_monitor(st, monitor_name);
     let output_rect = Rectangle::from_size(output_size);
     let mut zone = output_rect;
 
     for surface in layer_shell_surfaces_sorted(st) {
         if layer_surface_monitor_name(st, surface.wl_surface()) != monitor_name {
+            continue;
+        }
+        // Promovida a nodo: el tamaño lo gobierna el Field, no la colocación.
+        if st
+            .model
+            .surface_to_node
+            .contains_key(&surface.wl_surface().id())
+        {
             continue;
         }
         if !st
@@ -715,6 +757,15 @@ pub(crate) fn layer_shell_placements_for_monitor(
         if layer_surface_monitor_name(st, surface.wl_surface()) != monitor_name {
             continue;
         }
+        // Una layer promovida a nodo se gobierna por el Field (render, foco,
+        // tamaño), no por la colocación layer-shell.
+        if st
+            .model
+            .surface_to_node
+            .contains_key(&surface.wl_surface().id())
+        {
+            continue;
+        }
         let data = layer_cached_state(&surface);
         let (origin, size) = compute_layer_placement(output_rect, &mut zone, data);
         placements.push(LayerPlacement {
@@ -755,6 +806,73 @@ fn layer_shell_surfaces_sorted(st: &Halley) -> Vec<LayerSurface> {
     surfaces
 }
 
+/// Snapshot de una superficie layer-shell para el IPC: mismo cálculo de
+/// colocación que [`layer_shell_placements_for_monitor`], pero conservando
+/// namespace, handle, anchor, zona exclusiva y estado de commit.
+pub(crate) struct LayerSurfaceSummary {
+    pub(crate) handle: u64,
+    pub(crate) namespace: Option<String>,
+    pub(crate) layer: Layer,
+    pub(crate) anchor: Anchor,
+    pub(crate) exclusive_zone: ExclusiveZone,
+    pub(crate) keyboard_interactivity: KeyboardInteractivity,
+    pub(crate) committed: bool,
+    pub(crate) keyboard_focus: bool,
+    /// Nodo asociado si la superficie está promovida a ventana del Field.
+    pub(crate) promoted_node: Option<NodeId>,
+    pub(crate) origin: Point<i32, Logical>,
+    pub(crate) size: Size<i32, Logical>,
+}
+
+pub(crate) fn layer_surface_summaries_for_monitor(
+    st: &Halley,
+    monitor_name: &str,
+) -> Vec<LayerSurfaceSummary> {
+    let output_rect = Rectangle::from_size(layer_output_size_for_monitor(st, monitor_name));
+    let mut zone = output_rect;
+    let mut summaries = Vec::new();
+
+    for surface in layer_shell_surfaces_sorted(st) {
+        if layer_surface_monitor_name(st, surface.wl_surface()) != monitor_name {
+            continue;
+        }
+        let data = layer_cached_state(&surface);
+        let (origin, size) = compute_layer_placement(output_rect, &mut zone, data);
+        let id = surface.wl_surface().id();
+        let promoted_node = st.model.surface_to_node.get(&id).copied();
+        summaries.push(LayerSurfaceSummary {
+            handle: st
+                .model
+                .monitor_state
+                .layer_surface_handles
+                .get(&id)
+                .copied()
+                .unwrap_or(0),
+            namespace: st
+                .model
+                .monitor_state
+                .layer_surface_namespace
+                .get(&id)
+                .cloned(),
+            layer: data.layer,
+            anchor: data.anchor,
+            exclusive_zone: data.exclusive_zone,
+            keyboard_interactivity: data.keyboard_interactivity,
+            committed: st
+                .model
+                .monitor_state
+                .layer_surface_committed
+                .contains(&id),
+            keyboard_focus: st.model.monitor_state.layer_keyboard_focus == Some(id),
+            promoted_node,
+            origin,
+            size,
+        });
+    }
+
+    summaries
+}
+
 pub(crate) fn keyboard_focus_is_layer_surface(st: &Halley) -> bool {
     if st.model.monitor_state.layer_keyboard_focus.is_some() {
         return true;
@@ -764,6 +882,9 @@ pub(crate) fn keyboard_focus_is_layer_surface(st: &Halley) -> bool {
     };
     keyboard
         .current_focus()
+        // Una layer promovida a nodo es una ventana del Field: con foco de
+        // teclado NO debe bloquear los atajos del compositor.
+        .filter(|focus| !crate::compositor::layer_window::is_promoted_layer_surface(st, focus))
         .is_some_and(|focus| is_layer_surface(st, &focus))
 }
 

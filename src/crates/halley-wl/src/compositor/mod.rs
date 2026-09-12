@@ -8,6 +8,7 @@ pub mod exit_confirm;
 pub mod focus;
 pub mod fullscreen;
 pub mod interaction;
+pub mod layer_window;
 pub mod monitor;
 pub mod overlap;
 pub mod overview;

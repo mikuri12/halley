@@ -1252,6 +1252,9 @@ pub(super) fn draw_cursor_layer(
     cursor_config: &halley_config::CursorConfig,
 ) -> Result<(), Box<dyn Error>> {
     if let Some((sx, sy)) = cursor_screen {
+        // Snapshot the dynamic-cursor transform before the mutable sprite
+        // resolution below (CursorTransform is Copy).
+        let dynamic_transform = cursor_manager.dynamic.shown();
         let draw_fallback_arrow = match &cursor.cursor_status {
             smithay::input::pointer::CursorImageStatus::Hidden => false,
             smithay::input::pointer::CursorImageStatus::Named(icon) => {
@@ -1262,6 +1265,8 @@ pub(super) fn draw_cursor_layer(
                         (sx, sy),
                         sprite.as_ref(),
                         cursor_manager.cursor_elapsed_ms(),
+                        &dynamic_transform,
+                        cursor_config.dynamic.shake.nearest,
                     )?;
                     false
                 } else {

@@ -6,8 +6,9 @@ use halley_api::{
 use crate::cmd::{
     bearings::parse_bearings_request, capture::parse_capture_request,
     cluster::parse_cluster_request, gamescope::parse_gamescope_request,
-    monitor::parse_monitor_request, node::parse_node_request, portal::parse_portal_request,
-    stack::parse_stack_request, tile::parse_tile_request, trail::parse_trail_request,
+    layer::parse_layer_request, monitor::parse_monitor_request, node::parse_node_request,
+    portal::parse_portal_request, stack::parse_stack_request, tile::parse_tile_request,
+    trail::parse_trail_request,
 };
 use crate::help::HelpTopic;
 
@@ -77,6 +78,7 @@ pub(crate) fn parse_request(args: &[String]) -> Result<ParseOutcome, UsageError>
         "cluster" => parse_cluster_request(&args[1..]),
         "stack" => parse_stack_request(&args[1..]),
         "tile" => parse_tile_request(&args[1..]),
+        "layer" => parse_layer_request(&args[1..]),
         other => Err(UsageError::new(
             format!("unknown command: {other}"),
             HelpTopic::Top,
@@ -351,6 +353,73 @@ mod tests {
                 assert_eq!(output.as_deref(), Some("DP-1"));
             }
             _ => panic!("unexpected parse outcome"),
+        }
+    }
+
+    #[test]
+    fn layer_list_request_parses() {
+        let args = vec!["layer".to_string(), "list".to_string()];
+        let outcome = match parse_request(&args) {
+            Ok(outcome) => outcome,
+            Err(err) => panic!("layer list request should parse: {}", err.message),
+        };
+
+        match outcome {
+            ParseOutcome::Request(halley_api::Request::Layer(
+                halley_api::LayerRequest::List { output },
+            )) => {
+                assert_eq!(output, None);
+            }
+            _ => panic!("unexpected parse outcome"),
+        }
+    }
+
+    #[test]
+    fn layer_promote_request_parses() {
+        let args = vec!["layer".to_string(), "promote".to_string(), "7".to_string()];
+        let outcome = match parse_request(&args) {
+            Ok(outcome) => outcome,
+            Err(err) => panic!("layer promote request should parse: {}", err.message),
+        };
+
+        match outcome {
+            ParseOutcome::Request(halley_api::Request::Layer(
+                halley_api::LayerRequest::Promote { handle },
+            )) => {
+                assert_eq!(handle, 7);
+            }
+            _ => panic!("unexpected parse outcome"),
+        }
+    }
+
+    #[test]
+    fn layer_demote_request_parses() {
+        let args = vec!["layer".to_string(), "demote".to_string(), "12".to_string()];
+        let outcome = match parse_request(&args) {
+            Ok(outcome) => outcome,
+            Err(err) => panic!("layer demote request should parse: {}", err.message),
+        };
+
+        match outcome {
+            ParseOutcome::Request(halley_api::Request::Layer(
+                halley_api::LayerRequest::Demote { handle },
+            )) => {
+                assert_eq!(handle, 12);
+            }
+            _ => panic!("unexpected parse outcome"),
+        }
+    }
+
+    #[test]
+    fn layer_promote_rejects_non_numeric_handle() {
+        let args = vec![
+            "layer".to_string(),
+            "promote".to_string(),
+            "noctalia-osd".to_string(),
+        ];
+        match parse_request(&args) {
+            Ok(_) => panic!("layer promote should reject a non-numeric handle"),
+            Err(err) => assert!(!err.message.is_empty()),
         }
     }
 

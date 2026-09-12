@@ -272,6 +272,17 @@ pub(crate) fn handle_pointer_motion_absolute<B: BackendView>(
     // hover focus-mode resumes driving the spawn target.
     st.input.interaction_state.monitor_focus_pinned = false;
     crate::compositor::platform::refresh_cursor_surface_outputs(st);
+    // Dynamic cursors: feed the simulation on real motion events (the rotate
+    // mode updates here; tilt/stretch/shake update per frame tick). Warp
+    // detection uses the event's own relative delta.
+    {
+        let dynamic_cfg = st.runtime.tuning.cursor.dynamic.clone();
+        st.platform.cursor_manager.dynamic_on_move(
+            (routing.global_sx as f64, routing.global_sy as f64),
+            delta,
+            &dynamic_cfg,
+        );
+    }
 
     if handle_screenshot_pointer_motion(
         st,

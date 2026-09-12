@@ -449,12 +449,14 @@ pub(crate) fn handle_pointer_axis_input<B: BackendView>(
             && let Some(focus) = target_focus
         {
             if locked_surface.is_none() {
-                let location =
-                    if crate::compositor::monitor::layer_shell::is_layer_surface_tree(st, &focus.0)
-                        || crate::protocol::wayland::session_lock::is_session_lock_surface(
-                            st, &focus.0,
-                        )
-                    {
+                let location = if (crate::compositor::monitor::layer_shell::is_layer_surface_tree(
+                    st,
+                    &focus.0,
+                ) && !crate::compositor::layer_window::is_promoted_layer_surface(st, &focus.0))
+                    || crate::protocol::wayland::session_lock::is_session_lock_surface(
+                        st, &focus.0,
+                    )
+                {
                         (context.local_sx as f64, context.local_sy as f64).into()
                     } else {
                         let cam_scale = st.camera_render_scale() as f64;

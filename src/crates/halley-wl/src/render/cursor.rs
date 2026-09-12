@@ -8,6 +8,9 @@ use smithay::{
 
 use super::cursor_theme::SoftwareCursorSprite;
 use super::draw_primitives::draw_rect;
+use super::dynamic_cursor::{
+    CursorTransform, nearest_sampling_enabled, transform_cursor_frame,
+};
 
 // ---------------------------------------------------------------------------
 // Hotspot
@@ -82,21 +85,62 @@ fn surface_tree_root(surface: &WlSurface) -> WlSurface {
 ///
 /// `elapsed_ms` is the time elapsed since the active cursor animation
 /// started; it is used to select the frame of an animated cursor.
+///
+/// `transform` is the dynamic-cursor transform (rotation/zoom/stretch) to
+/// apply around the sprite hotspot; the identity transform takes the fast
+/// path with no per-pixel work. `nearest_cfg` is the
+/// `cursor.dynamic.shake.nearest` setting used when magnifying.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_cursor_sprite<F: Frame>(
     frame: &mut F,
     damage: Rectangle<i32, Physical>,
     cursor_screen: (f32, f32),
     sprite: &SoftwareCursorSprite,
     elapsed_ms: u64,
+    transform: &CursorTransform,
+    nearest_cfg: u8,
 ) -> Result<(), F::Error> {
     let (sx, sy) = cursor_screen;
-    let x0 = sx.round() as i32 - sprite.hotspot_x;
-    let y0 = sy.round() as i32 - sprite.hotspot_y;
     let frame_data = sprite.frame_at(elapsed_ms);
     let pixels = &frame_data.pixels_bgra;
-    let w = sprite.width;
-    let h = sprite.height;
 
+    if !transform.is_identity() {
+        let nearest = nearest_sampling_enabled(nearest_cfg, transform.scale);
+        let transformed = transform_cursor_frame(
+            pixels,
+            sprite.width,
+            sprite.height,
+            (sprite.hotspot_x, sprite.hotspot_y),
+            transform,
+            nearest,
+        );
+        let x0 = sx.round() as i32 - transformed.hotspot_x;
+        let y0 = sy.round() as i32 - transformed.hotspot_y;
+        blit_bgra_runlength(
+            frame,
+            damage,
+            &transformed.pixels,
+            transformed.width,
+            transformed.height,
+            x0,
+            y0,
+        )
+    } else {
+        let x0 = sx.round() as i32 - sprite.hotspot_x;
+        let y0 = sy.round() as i32 - sprite.hotspot_y;
+        blit_bgra_runlength(frame, damage, pixels, sprite.width, sprite.height, x0, y0)
+    }
+}
+
+fn blit_bgra_runlength<F: Frame>(
+    frame: &mut F,
+    damage: Rectangle<i32, Physical>,
+    pixels: &[u8],
+    w: usize,
+    h: usize,
+    x0: i32,
+    y0: i32,
+) -> Result<(), F::Error> {
     for y in 0..h {
         let mut x = 0usize;
         while x < w {

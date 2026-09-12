@@ -1223,13 +1223,164 @@ pub struct BearingsConfig {
     pub blur: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// How the cursor shape reacts to pointer motion (dynamic cursors).
+/// Mirrors the modes of hypr-dynamic-cursors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DynamicCursorMode {
+    /// No cursor behaviour simulation.
+    None,
+    /// Simulate a stick dragged on one end: the cursor rotates towards the
+    /// movement direction.
+    Rotate,
+    /// Tilt the cursor based on horizontal velocity (air-drag-ish).
+    Tilt,
+    /// Stretch/squish the cursor along the movement direction (comic style).
+    Stretch,
+}
+
+/// Relationship between pointer speed and effect intensity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CursorActivation {
+    Linear,
+    Quadratic,
+    NegativeQuadratic,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DynamicRotateConfig {
+    /// Length in px of the simulated stick (most realistic if it matches the
+    /// actual cursor size).
+    pub length: f32,
+    /// Clockwise offset applied to the angle, in degrees.
+    pub offset_deg: f32,
+}
+
+impl Default for DynamicRotateConfig {
+    fn default() -> Self {
+        Self { length: 20.0, offset_deg: 0.0 }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DynamicTiltConfig {
+    pub activation: CursorActivation,
+    /// Speed (px/s) at which the full tilt is reached.
+    pub limit_px_s: f32,
+    /// Time window (ms) over which the speed is calculated.
+    pub window_ms: u64,
+    /// Full tilt for each side, in degrees.
+    pub full_deg: f32,
+}
+
+impl Default for DynamicTiltConfig {
+    fn default() -> Self {
+        Self {
+            activation: CursorActivation::NegativeQuadratic,
+            limit_px_s: 5000.0,
+            window_ms: 100,
+            full_deg: 60.0,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DynamicStretchConfig {
+    pub activation: CursorActivation,
+    /// Speed (px/s) at which the full stretch (2x length) is reached.
+    pub limit_px_s: f32,
+    /// Time window (ms) over which the speed is calculated.
+    pub window_ms: u64,
+}
+
+impl Default for DynamicStretchConfig {
+    fn default() -> Self {
+        Self {
+            activation: CursorActivation::NegativeQuadratic,
+            limit_px_s: 3000.0,
+            window_ms: 100,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DynamicShakeConfig {
+    /// Enables shake-to-find magnification.
+    pub enabled: bool,
+    /// `trail / diagonal` ratio above which a shake is detected.
+    pub threshold: f32,
+    /// Magnification level immediately after shake start.
+    pub base: f32,
+    /// Magnification increase per second while shaking.
+    pub speed: f32,
+    /// How much the shake intensity boosts the growth speed.
+    pub influence: f32,
+    /// Maximal magnification (values <= 1 disable the limit).
+    pub limit: f32,
+    /// Time in ms the cursor stays magnified after the shake ended.
+    pub timeout_ms: u64,
+    /// Show tilt/rotate/stretch effects while shaking.
+    pub effects: bool,
+    /// Pixelated (nearest-neighbour) scaling when magnified:
+    /// 0 = never, 1 = when magnifying beyond the texture size, 2 = always.
+    pub nearest: u8,
+}
+
+impl Default for DynamicShakeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            threshold: 6.0,
+            base: 4.0,
+            speed: 4.0,
+            influence: 0.0,
+            limit: 0.0,
+            timeout_ms: 2000,
+            effects: false,
+            nearest: 1,
+        }
+    }
+}
+
+/// Native port of the hypr-dynamic-cursors behaviour (rotate / tilt / stretch
+/// modes plus shake-to-find). Disabled by default: set
+/// `cursor.dynamic.enabled true` to opt in.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DynamicCursorConfig {
+    pub enabled: bool,
+    pub mode: DynamicCursorMode,
+    /// Minimum angle difference in degrees after which the shape is changed.
+    pub threshold_deg: f32,
+    /// Ignore cursor warps (programmatic jumps) for the simulation.
+    pub ignore_warps: bool,
+    pub rotate: DynamicRotateConfig,
+    pub tilt: DynamicTiltConfig,
+    pub stretch: DynamicStretchConfig,
+    pub shake: DynamicShakeConfig,
+}
+
+impl Default for DynamicCursorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: DynamicCursorMode::Tilt,
+            threshold_deg: 2.0,
+            ignore_warps: true,
+            rotate: DynamicRotateConfig::default(),
+            tilt: DynamicTiltConfig::default(),
+            stretch: DynamicStretchConfig::default(),
+            shake: DynamicShakeConfig::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct CursorConfig {
     pub theme: String,
     pub size: u32,
     pub hide_while_typing: bool,
     pub hide_after_ms: u64,
     pub hide_on_keyboard_nav: bool,
+    pub dynamic: DynamicCursorConfig,
 }
 
 impl Default for CursorConfig {
@@ -1240,6 +1391,7 @@ impl Default for CursorConfig {
             hide_while_typing: false,
             hide_after_ms: 0,
             hide_on_keyboard_nav: true,
+            dynamic: DynamicCursorConfig::default(),
         }
     }
 }

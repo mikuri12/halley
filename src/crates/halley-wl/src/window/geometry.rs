@@ -125,6 +125,21 @@ fn snapshot_surface_geometry(
                 g.size.h as f32,
             ),
         );
+    } else if st.model.node_layer_surfaces.contains_key(&node_id)
+        && let Some(region) =
+            crate::compositor::layer_window::layer_surface_content_region(wl, bbox)
+    {
+        // Layer promovida a nodo: el input region (contenido sin el padding
+        // de sombra del buffer) hace de geometría de la ventana.
+        st.ui.render_state.cache.window_geometry.insert(
+            node_id,
+            (
+                region.loc.x as f32,
+                region.loc.y as f32,
+                region.size.w as f32,
+                region.size.h as f32,
+            ),
+        );
     } else {
         st.ui.render_state.cache.window_geometry.insert(
             node_id,

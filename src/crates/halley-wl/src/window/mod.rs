@@ -547,6 +547,27 @@ pub(crate) fn collect_active_surfaces(
         })
         .collect();
 
+    // Layer-shell promovidas a nodo: mismas condiciones de visibilidad que los
+    // toplevels, con la superficie del mapa node→layer.
+    for (node_id, wl) in st.model.node_layer_surfaces.clone() {
+        let Some(node) = st.model.field.node(node_id) else {
+            continue;
+        };
+        if crate::compositor::clusters::system::pending_lift_cluster_node_staged(&*st, node_id)
+            || !st.model.field.is_visible(node_id)
+            || !st.node_assigned_to_current_monitor(node_id)
+            || st
+                .ui
+                .render_state
+                .closing_window_animation_active_for_node(node_id, now)
+            || node.state != halley_core::field::NodeState::Active
+        {
+            continue;
+        }
+        node_surface_map.insert(node_id, wl.clone());
+        wl_surfaces.push((node_id, wl));
+    }
+
     wl_surfaces.sort_by_key(|(id, _)| active_surface_draw_rank(st, *id));
 
     for (node_id, wl) in wl_surfaces {

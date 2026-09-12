@@ -117,6 +117,9 @@ pub enum CompositorBindingAction {
     /// Pan the camera back to centre on the last focused node — a quick "go back"
     /// after wandering the field.
     CenterLastFocused,
+    /// Convierte el widget layer-shell bajo el puntero (o con foco de teclado)
+    /// en una ventana flotante del Field, y viceversa: toggle promote/demote.
+    ToggleWidgetFloating,
     FocusCycle(FocusCycleBindingAction),
     Quit {
         requires_shift: bool,

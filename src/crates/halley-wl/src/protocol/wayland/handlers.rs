@@ -58,6 +58,10 @@ impl SeatHandler for Halley {
             seat,
             focused,
         );
+        let focused_node = focused.and_then(|wl| self.model.surface_to_node.get(&wl.id()).copied());
+        self.platform
+            .wlr_foreign_toplevel_state
+            .focus_changed(focused_node, &self.model.surface_to_node);
     }
 
     fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
@@ -336,3 +340,11 @@ impl DataControlHandler for Halley {
 }
 
 delegate_data_control!(Halley);
+ 
+impl smithay::wayland::foreign_toplevel_list::ForeignToplevelListHandler for Halley {
+    fn foreign_toplevel_list_state(
+        &mut self,
+    ) -> &mut smithay::wayland::foreign_toplevel_list::ForeignToplevelListState {
+        &mut self.platform.foreign_toplevel_list_state
+    }
+}

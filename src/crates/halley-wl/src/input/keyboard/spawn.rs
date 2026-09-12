@@ -191,6 +191,7 @@ mod tests {
                 hide_while_typing: false,
                 hide_after_ms: 2_000,
                 hide_on_keyboard_nav: true,
+                dynamic: Default::default(),
             },
             Some("token-123"),
         );

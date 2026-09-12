@@ -20,7 +20,7 @@
 #   doas xbps-install --repository hostdir/binpkgs halley
 
 pkgname=halley
-version=0.5.0
+version=0.5.3
 revision=1
 # Sin el sufijo `*`: los binarios son glibc, no valen para musl.
 archs="x86_64"

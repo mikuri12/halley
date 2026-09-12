@@ -307,6 +307,20 @@ pub(crate) fn layer_surface_focus_for_screen(
         {
             continue;
         }
+        // Click-shield/backdrop del shell: mientras una layer de su mismo
+        // cliente vive promovida como ventana, esta capa fullscreen invisible
+        // debe ser click-through o se comería los clicks "fuera" y cerraría
+        // la ventana promovida (ver `layer_shielded_by_promotion`).
+        if crate::compositor::layer_window::layer_shielded_by_promotion(
+            st,
+            &placement.wl_surface,
+            placement.layer,
+            (placement.size.w, placement.size.h),
+            ws_w,
+            ws_h,
+        ) {
+            continue;
+        }
 
         for (popup, popup_offset) in popups_top_to_bottom(st, &placement.wl_surface) {
             let popup_geo = popup.geometry();
@@ -401,6 +415,16 @@ pub(crate) fn pointer_focus_for_screen(
     if let Some(focus) = crate::protocol::wayland::session_lock::focus_for_screen(st, sx, sy) {
         return Some(focus);
     }
+    // Las layers promovidas a nodo ganan al resto del layer-shell: el usuario
+    // las sacó del stack, y su propio click-shield (la capa invisible que
+    // Noctalia pone para cerrar el popup al click afuera) no debe robarles
+    // el input. Fuera de la región del nodo promovido, las layers normales
+    // (bar, shield, OSD) conservan su prioridad.
+    if let Some(focus) =
+        promoted_layer_node_focus_for_screen(st, ws_w, ws_h, sx, sy, now, resize_preview)
+    {
+        return Some(focus);
+    }
     if let Some(focus) = layer_surface_focus_for_screen(st, ws_w, ws_h, sx, sy, now, resize_preview)
     {
         return Some(focus);
@@ -450,6 +474,21 @@ pub(crate) fn pointer_focus_for_screen(
             return Some((surface, focus_origin));
         }
 
+        // Layer-shell promovida a nodo: mismo hit-test de superficie bajo el
+        // puntero, con la transform del nodo (fallback; la prioridad normal
+        // la resuelve `promoted_layer_node_focus_for_screen` antes).
+        if let Some(wl) = st.model.node_layer_surfaces.get(&hit.node_id).cloned()
+            && let Some((surface, surface_loc)) =
+                under_from_surface_tree(&wl, local, (0, 0), WindowSurfaceType::ALL)
+        {
+            let cam_scale_f = st.camera_render_scale() as f64;
+            let focus_origin = Point::<f64, Logical>::from((
+                xform.origin_x as f64 / cam_scale_f + surface_loc.x as f64,
+                xform.origin_y as f64 / cam_scale_f + surface_loc.y as f64,
+            ));
+            return Some((surface, focus_origin));
+        }
+
         if resize_preview.is_some_and(|rz| rz.node_id == hit.node_id) {
             for top in st.platform.xdg_shell_state.toplevel_surfaces() {
                 let wl = top.wl_surface().clone();
@@ -467,6 +506,55 @@ pub(crate) fn pointer_focus_for_screen(
                 return Some((wl, focus_origin));
             }
         }
+    }
+    None
+}
+
+/// Foco de puntero para layers promovidas a nodo, con prioridad sobre el
+/// resto del layer-shell (ver `pointer_focus_for_screen`).
+pub(crate) fn promoted_layer_node_focus_for_screen(
+    st: &mut Halley,
+    ws_w: i32,
+    ws_h: i32,
+    sx: f32,
+    sy: f32,
+    now: Instant,
+    resize_preview: Option<ResizeCtx>,
+) -> Option<(
+    smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
+    Point<f64, Logical>,
+)> {
+    let hits = hit_nodes_at(st, ws_w, ws_h, sx, sy, now, resize_preview);
+    for hit in hits {
+        let Some(wl) = st.model.node_layer_surfaces.get(&hit.node_id).cloned() else {
+            continue;
+        };
+        let Some(xform) = active_node_surface_transform_screen_details(
+            st,
+            ws_w,
+            ws_h,
+            hit.node_id,
+            now,
+            resize_preview,
+        ) else {
+            continue;
+        };
+        let scale = xform.scale.max(0.001);
+        let local = Point::<f64, Logical>::from((
+            ((sx - xform.origin_x) / scale) as f64,
+            ((sy - xform.origin_y) / scale) as f64,
+        ));
+        let Some((surface, surface_loc)) =
+            under_from_surface_tree(&wl, local, (0, 0), WindowSurfaceType::ALL)
+        else {
+            continue;
+        };
+        let cam_scale_f = st.camera_render_scale() as f64;
+        let focus_origin = Point::<f64, Logical>::from((
+            xform.origin_x as f64 / cam_scale_f + surface_loc.x as f64,
+            xform.origin_y as f64 / cam_scale_f + surface_loc.y as f64,
+        ));
+        return Some((surface, focus_origin));
     }
     None
 }

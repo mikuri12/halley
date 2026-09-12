@@ -1,6 +1,7 @@
 use halley_api::{
     ApertureStatusResponse, ApiError, CaptureStatusResponse, ClusterInfo, ClusterLayoutKind,
-    ClusterListResponse, ClusterSummary, LogicalOutputInfo, NodeInfo, NodeListResponse,
+    ClusterListResponse, ClusterSummary, LayerAnchorEdge, LayerInfo, LayerKeyboardInteractivity,
+    LayerListResponse, LayerShellKind, LogicalOutputInfo, NodeInfo, NodeListResponse,
     NodeProtocolFamily, NodeRelationInfo, NodeRole, OutputInfo, OutputStatus, OutputsResponse,
     Response, TrailEntryInfo, TrailListResponse, VersionInfo,
 };
@@ -47,6 +48,18 @@ pub(crate) fn print_response(response: Response) -> Result<(), String> {
                 print_node_info(&node);
                 Ok(())
             }
+        }
+        Response::LayerList(list) => {
+            if wants_json() {
+                print_json(&list)
+            } else {
+                print_layer_list(&list);
+                Ok(())
+            }
+        }
+        Response::LayerPromoted(result) => {
+            println!("promoted: node {}", result.node_id);
+            Ok(())
         }
         Response::ClusterList(list) => {
             if wants_json() {
@@ -268,6 +281,87 @@ fn print_node_list(list: &NodeListResponse) {
 fn print_node_info(node: &NodeInfo) {
     println!("{}  {}", node.id, node.title);
     print_node_fields(node, 2);
+}
+
+fn print_layer_list(list: &LayerListResponse) {
+    if list.outputs.iter().all(|group| group.layers.is_empty()) {
+        println!("No layer surfaces.");
+        return;
+    }
+    for group in &list.outputs {
+        println!("{}", group.output);
+        println!("  layers: {}", group.layers.len());
+        if group.layers.is_empty() {
+            println!("  entries: (none)");
+            continue;
+        }
+        println!("  entries:");
+        for layer in &group.layers {
+            print_layer_brief(layer);
+        }
+    }
+}
+
+fn print_layer_brief(layer: &LayerInfo) {
+    let marker = if layer.keyboard_focus { "*" } else { "-" };
+    println!(
+        "    {marker} {}  {}",
+        layer.id,
+        layer.namespace.as_deref().unwrap_or("(no namespace)")
+    );
+    println!("      layer: {}", format_layer_kind(layer.layer));
+    println!("      anchor: {}", format_layer_anchor(&layer.anchor));
+    println!(
+        "      exclusive-zone: {}",
+        layer
+            .exclusive_zone
+            .map(|zone| zone.to_string())
+            .unwrap_or_else(|| "none".to_string())
+    );
+    println!(
+        "      keyboard: {}",
+        format_layer_interactivity(layer.keyboard_interactivity)
+    );
+    println!("      committed: {}", layer.committed);
+    match layer.promoted_node {
+        Some(node_id) => println!("      promoted: node {node_id}"),
+        None => println!("      promoted: -"),
+    }
+    println!("      pos: {}, {}", layer.pos_x, layer.pos_y);
+    println!("      size: {} x {}", layer.width, layer.height);
+}
+
+fn format_layer_kind(kind: LayerShellKind) -> &'static str {
+    match kind {
+        LayerShellKind::Background => "background",
+        LayerShellKind::Bottom => "bottom",
+        LayerShellKind::Top => "top",
+        LayerShellKind::Overlay => "overlay",
+    }
+}
+
+fn format_layer_interactivity(interactivity: LayerKeyboardInteractivity) -> &'static str {
+    match interactivity {
+        LayerKeyboardInteractivity::None => "none",
+        LayerKeyboardInteractivity::OnDemand => "on-demand",
+        LayerKeyboardInteractivity::Exclusive => "exclusive",
+    }
+}
+
+fn format_layer_anchor(anchor: &[LayerAnchorEdge]) -> String {
+    if anchor.is_empty() {
+        return "(none)".to_string();
+    }
+    anchor
+        .iter()
+        .map(|edge| match edge {
+            LayerAnchorEdge::Top => "top",
+            LayerAnchorEdge::Bottom => "bottom",
+            LayerAnchorEdge::Left => "left",
+            LayerAnchorEdge::Right => "right",
+        })
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 fn print_node_brief(node: &NodeInfo) {

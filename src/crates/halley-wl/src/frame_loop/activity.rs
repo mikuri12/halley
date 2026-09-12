@@ -291,6 +291,19 @@ pub(crate) fn tty_output_animation_redraw_state(
         st.platform.cursor_manager.cursor_image(),
         CursorImageStatus::Named(_)
     ) && st.platform.cursor_manager.named_cursor_is_animated();
+    // Dynamic cursors (rotation/tilt/stretch decay or shake magnification in
+    // flight): keep continuous redraws on the outputs so the transform keeps
+    // animating even when the pointer itself is stationary.
+    let dynamic_cursor_active = st.runtime.tuning.cursor.dynamic.enabled
+        && matches!(
+            st.platform.cursor_manager.cursor_image(),
+            CursorImageStatus::Named(_)
+        )
+        && st
+            .platform
+            .cursor_manager
+            .dynamic
+            .animation_active(std::time::Instant::now());
     let active = fade_related
         || cluster_tile_active
         || close_window_active
@@ -301,7 +314,8 @@ pub(crate) fn tty_output_animation_redraw_state(
         || camera_smoothing_active
         || overlay_active
         || background_active
-        || cursor_named_animation_active;
+        || cursor_named_animation_active
+        || dynamic_cursor_active;
 
     TtyOutputAnimationRedrawState {
         active,

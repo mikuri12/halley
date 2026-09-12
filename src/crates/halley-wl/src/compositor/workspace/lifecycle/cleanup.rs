@@ -140,6 +140,15 @@ pub(super) fn reconcile_surface_bindings(st: &mut Halley) {
         .toplevel_surfaces()
         .iter()
         .map(|t| t.wl_surface().id())
+        // Las layers promovidas a nodo también mantienen viva su entrada de
+        // `surface_to_node`: no son toplevels xdg, pero su recurso sigue vivo.
+        .chain(
+            st.platform
+                .wlr_layer_shell_state
+                .layer_surfaces()
+                .filter(|surface| surface.alive())
+                .map(|surface| surface.wl_surface().id()),
+        )
         .collect();
 
     let stale: Vec<ObjectId> = st
@@ -160,6 +169,7 @@ pub(super) fn reconcile_surface_bindings(st: &mut Halley) {
     for key in stale {
         st.runtime.surface_activity.remove(&key);
         if let Some(id) = st.model.surface_to_node.remove(&key) {
+            st.model.node_layer_surfaces.remove(&id);
             let queued_promotion = capture_queued_overflow_promotion(st, id);
             let active_tiled_focus_restore = st
                 .model
@@ -327,6 +337,7 @@ pub(super) fn drop_surface_impl(
     st.runtime.surface_activity.remove(&key);
     crate::protocol::wayland::activation::clear_surface_activation(st, surface);
     if let Some(id) = st.model.surface_to_node.remove(&key) {
+        st.model.node_layer_surfaces.remove(&id);
         let silent_close = st
             .model
             .workspace_state

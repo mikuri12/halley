@@ -176,6 +176,11 @@ impl ConfigSchema {
             "bearings",
             "clusters",
             "cursor",
+            "cursor.dynamic",
+            "cursor.dynamic.rotate",
+            "cursor.dynamic.stretch",
+            "cursor.dynamic.shake",
+            "cursor.dynamic.tilt",
             "debug",
             "decay",
             "decorations",
@@ -287,6 +292,29 @@ impl ConfigSchema {
             "cursor.hide-after-ms",
             "cursor.hide-after-inactive-ms",
             "cursor.hide-on-keyboard-nav",
+            "cursor.dynamic.enabled",
+            "cursor.dynamic.mode",
+            "cursor.dynamic.threshold",
+            "cursor.dynamic.ignore-warps",
+            "cursor.dynamic.rotate.length",
+            "cursor.dynamic.rotate.offset",
+            "cursor.dynamic.tilt.activation",
+            "cursor.dynamic.tilt.limit",
+            "cursor.dynamic.tilt.window",
+            "cursor.dynamic.tilt.full",
+            "cursor.dynamic.stretch.activation",
+            "cursor.dynamic.stretch.limit",
+            "cursor.dynamic.stretch.window",
+            "cursor.dynamic.shake.enabled",
+            "cursor.dynamic.shake.threshold",
+            "cursor.dynamic.shake.base",
+            "cursor.dynamic.shake.speed",
+            "cursor.dynamic.shake.influence",
+            "cursor.dynamic.shake.limit",
+            "cursor.dynamic.shake.timeout",
+            "cursor.dynamic.shake.timeout-ms",
+            "cursor.dynamic.shake.effects",
+            "cursor.dynamic.shake.nearest",
             "debug.overlay-fps",
             "debug.show-ring-when-resizing",
             "decay.active-delay",
@@ -602,6 +630,22 @@ fn numeric_scalar(path: &str) -> bool {
             | "cursor.size"
             | "cursor.hide-after-ms"
             | "cursor.hide-after-inactive-ms"
+            | "cursor.dynamic.threshold"
+            | "cursor.dynamic.rotate.length"
+            | "cursor.dynamic.rotate.offset"
+            | "cursor.dynamic.tilt.limit"
+            | "cursor.dynamic.tilt.window"
+            | "cursor.dynamic.tilt.full"
+            | "cursor.dynamic.stretch.limit"
+            | "cursor.dynamic.stretch.window"
+            | "cursor.dynamic.shake.threshold"
+            | "cursor.dynamic.shake.base"
+            | "cursor.dynamic.shake.speed"
+            | "cursor.dynamic.shake.influence"
+            | "cursor.dynamic.shake.limit"
+            | "cursor.dynamic.shake.timeout"
+            | "cursor.dynamic.shake.timeout-ms"
+            | "cursor.dynamic.shake.nearest"
             | "decay.active-delay"
             | "decay.inactive-delay"
             | "decay.docked-offscreen-delay"
@@ -735,6 +779,10 @@ fn bool_scalar(path: &str) -> bool {
             | "cursor.hide-while-typing"
             | "cursor.hide-when-typing"
             | "cursor.hide-on-keyboard-nav"
+            | "cursor.dynamic.enabled"
+            | "cursor.dynamic.ignore-warps"
+            | "cursor.dynamic.shake.enabled"
+            | "cursor.dynamic.shake.effects"
             | "debug.overlay-fps"
             | "debug.show-ring-when-resizing"
             | "decorations.secondary-border.enabled"
@@ -802,6 +850,10 @@ fn enum_allowed_values(path: &str) -> Option<&'static [&'static str]> {
             "ccw",
         ]),
         "clusters.default-layout" => Some(&["tiling", "tile", "stacking", "stack"]),
+        "cursor.dynamic.mode" => Some(&["none", "rotate", "tilt", "stretch"]),
+        "cursor.dynamic.tilt.activation" | "cursor.dynamic.stretch.activation" => {
+            Some(&["linear", "quadratic", "negative-quadratic"])
+        }
         "field.close-restore-pan" => Some(&["never", "if-offscreen", "if_offscreen", "always"]),
         "field.pan-to-new" => Some(&["never", "if-needed", "if_needed", "always", "true", "false"]),
         "field.pins.corner" | "field.pins.badge-corner" => Some(&[

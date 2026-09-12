@@ -37,6 +37,10 @@ pub(crate) enum HelpTopic {
     Tile,
     TileFocus,
     TileSwap,
+    Layer,
+    LayerList,
+    LayerPromote,
+    LayerDemote,
     Portal,
     Gamescope,
 }
@@ -69,6 +73,7 @@ pub(crate) fn print_help(topic: HelpTopic) {
                 ("cluster", "Cluster workspace actions"),
                 ("stack", "Stack layout actions"),
                 ("tile", "Tile layout actions"),
+                ("layer", "Layer-shell surface inspection"),
                 ("portal", "Portal backend diagnostics"),
                 ("gamescope", "Wrap a game launch in gamescope"),
             ],
@@ -349,6 +354,37 @@ pub(crate) fn print_help(topic: HelpTopic) {
                 "left|right|up|down",
                 "Direction of the adjacent visible tile",
             )],
+        ),
+        HelpTopic::Layer => print_help_page(
+            "halleyctl layer",
+            &[
+                "halleyctl layer list [-o OUTPUT] [--json]",
+                "halleyctl layer promote HANDLE",
+                "halleyctl layer demote HANDLE",
+            ],
+            &[
+                ("list", "List layer-shell surfaces (namespaces, anchors, focus)"),
+                ("promote", "Promote a layer surface to a Field window node"),
+                ("demote", "Return a promoted layer surface to layer-shell placement"),
+            ],
+        ),
+        HelpTopic::LayerList => print_help_page(
+            "halleyctl layer list",
+            &["halleyctl layer list [-o OUTPUT] [--json]"],
+            &[(
+                "list",
+                "List layer-shell surfaces on the focused or all outputs",
+            )],
+        ),
+        HelpTopic::LayerPromote => print_help_page(
+            "halleyctl layer promote",
+            &["halleyctl layer promote HANDLE"],
+            &[("HANDLE", "Layer handle from `halleyctl layer list`")],
+        ),
+        HelpTopic::LayerDemote => print_help_page(
+            "halleyctl layer demote",
+            &["halleyctl layer demote HANDLE"],
+            &[("HANDLE", "Layer handle from `halleyctl layer list`")],
         ),
         HelpTopic::Portal => print_help_page(
             "halleyctl portal",
