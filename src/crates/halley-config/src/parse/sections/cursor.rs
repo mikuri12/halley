@@ -265,7 +265,7 @@ cursor:
       full 45
     end
     stretch:
-      activation "linear"
+      activation "negative_quadratic"
       limit 1500
       window 80
     end
@@ -300,7 +300,7 @@ end
         assert_eq!(d.tilt.limit_px_s, 2500.0);
         assert_eq!(d.tilt.window_ms, 150);
         assert_eq!(d.tilt.full_deg, 45.0);
-        assert_eq!(d.stretch.activation, CursorActivation::Linear);
+        assert_eq!(d.stretch.activation, CursorActivation::NegativeQuadratic);
         assert_eq!(d.stretch.limit_px_s, 1500.0);
         assert_eq!(d.stretch.window_ms, 80);
         assert!(!d.shake.enabled);

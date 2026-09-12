@@ -1,0 +1,88 @@
+# halley — Spatial Wayland compositor (Mikuri fork)
+#
+# Derived from upstream Halley v0.5.0 (https://github.com/saltnpepper97/halley)
+# with the following local fixes already applied inline in src/:
+#   - direct-scanout no longer disabled by pending frame-callbacks
+#   - fullscreen apps cover the Top/Overlay layer-shell surfaces (render + hit-test)
+#   - send_pending_configure() dedup (Chromium toast spam)
+#   - animated XCursor support (multi-frame)
+#   - adaptive idle tick + display-fd in calloop (drops idle CPU)
+#
+# Notes:
+#   - The src/ tree is already patched in the distfiles tarball: no patches= needed.
+#   - The halley-session wrapper ships a dbus-run-session guard for runit/no-systemd
+#     distros (without it the "no signal" bug appears on Void when logging in via ly).
+#
+# Build & install:
+#   ./xbps-src pkg halley
+#   doas xbps-install --repository hostdir/binpkgs halley   # o sudo
+#
+# After install, log out and pick "Halley" from the greeter menu.
+
+pkgname=halley
+version=0.5.0
+revision=1
+archs="x86_64*"
+build_style=cargo
+hostmakedepends="pkg-config rust cargo"
+makedepends="clang18-devel libclang18 wayland-devel libxkbcommon-devel
+ libinput-devel libseat-devel libudev-devel libgbm-devel libdrm-devel
+ libglvnd-devel pixman-devel dbus-devel pipewire-devel"
+depends="xwayland-satellite dbus seatd"
+short_desc="Spatial Wayland compositor (Mikuri fork with local fixes)"
+maintainer="mikuri12 <https://github.com/mikuri12>"
+license="GPL-3.0-only"
+homepage="https://github.com/mikuri12/halley"
+
+# Pinned release tarball of the Mikuri fork.
+#
+# IMPORTANTE: no mover el tag v0.5.0-mikuri.1 nunca más. GitHub regenera el
+# tarball cuando el tag apunta a otro commit, y el SHA256 cambia. El bucle
+# "cambio checksum -> muevo tag -> checksum cambia" es lo que rompía el build.
+# Para una nueva versión: crear un tag NUEVO, no re-apuntar este.
+distfiles="https://github.com/mikuri12/halley/archive/refs/tags/v0.5.0-mikuri.1.tar.gz"
+checksum="3b6deed7c41d476ba01c5f4e7e826277fc122f41bd5b22c6cb28900b29a7c2c6"
+# Para re-pinear a un tag futuro, reemplazar la URL y recalcular:
+#   curl -sL <url> | sha256sum
+
+# El tarball de GitHub se extrae en halley-0.5.0-mikuri.1/, no en el
+# ${pkgname}-${version} que xbps-src asume por defecto.
+wrksrc="${pkgname}-${version}-mikuri.1"
+# El workspace de cargo vive en src/, no en la raíz del repo.
+build_wrksrc="src"
+
+# xbps-src unpacks the tarball into ${wrksrc}/. The tarball contains the
+# repo root (README, src/, void/, nix/, ...), so the cargo workspace lives at
+# ${wrksrc}/src/ — declarado arriba como build_wrksrc.
+
+# do_build propio: el do_build de build_style=cargo pasa --target ${RUST_TARGET},
+# lo que deja los binarios en target/${RUST_TARGET}/release/. Compilando sin
+# --target quedan en target/release/, que es lo que espera do_install.
+do_build() {
+	cargo build --release
+}
+
+do_install() {
+	# cwd = ${wrksrc}/${build_wrksrc} = .../src
+	vbin target/release/halley halley
+	vbin target/release/halleyctl halleyctl
+	vbin target/release/xdg-desktop-portal-halley xdg-desktop-portal-halley
+	# Wrapper with the dbus-run-session guard for Void runit.
+	vbin ${wrksrc}/void/halley-session halley-session
+
+	# Wayland-sessions .desktop so the greeter sees Halley.
+	vmkdir usr/share/wayland-sessions
+	vinstall ${wrksrc}/void/halley.desktop 644 usr/share/wayland-sessions halley.desktop
+
+	# xdg-desktop-portal backend metadata + routing config.
+	# xdg-desktop-portal discovers backends through these files; without them
+	# the halley ScreenCast/Screenshot (dmabuf zero-copy) won't be offered.
+	vmkdir usr/share/xdg-desktop-portal/portals
+	vinstall ${wrksrc}/void/halley.portal 644 usr/share/xdg-desktop-portal/portals halley.portal
+	vinstall ${wrksrc}/void/halley-portals.conf 644 usr/share/xdg-desktop-portal halley-portals.conf
+
+	# D-Bus service file for the portal backend (so xdg-desktop-portal can
+	# autolaunch xdg-desktop-portal-halley when ScreenCast is requested).
+	vinstall ${wrksrc}/src/packaging/dbus-1/services/org.freedesktop.impl.portal.desktop.halley.service \
+		644 usr/share/dbus-1/services org.freedesktop.impl.portal.desktop.halley.service
+}

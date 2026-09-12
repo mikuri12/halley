@@ -852,7 +852,7 @@ fn enum_allowed_values(path: &str) -> Option<&'static [&'static str]> {
         "clusters.default-layout" => Some(&["tiling", "tile", "stacking", "stack"]),
         "cursor.dynamic.mode" => Some(&["none", "rotate", "tilt", "stretch"]),
         "cursor.dynamic.tilt.activation" | "cursor.dynamic.stretch.activation" => {
-            Some(&["linear", "quadratic", "negative-quadratic"])
+            Some(&["linear", "quadratic", "negative-quadratic", "negative_quadratic"])
         }
         "field.close-restore-pan" => Some(&["never", "if-offscreen", "if_offscreen", "always"]),
         "field.pan-to-new" => Some(&["never", "if-needed", "if_needed", "always", "true", "false"]),
@@ -1328,6 +1328,28 @@ end
             "halley.rune",
         )
         .expect("effects block should validate");
+    }
+
+    #[test]
+    fn validation_accepts_dynamic_cursor_activation_underscore() {
+        validate_known_config_keys(
+            r#"
+cursor:
+  dynamic:
+    enabled true
+    mode "tilt"
+    tilt:
+      activation "negative_quadratic"
+    end
+    stretch:
+      activation "negative-quadratic"
+    end
+  end
+end
+"#,
+            "halley.rune",
+        )
+        .expect("activation with underscore/dash variants should validate");
     }
 
     #[test]
