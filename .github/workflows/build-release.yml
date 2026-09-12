@@ -95,7 +95,11 @@ jobs:
       - name: Generate xbps template
         run: |
           CHECKSUM=$(sha256sum "$TARBALL" | cut -d' ' -f1)
+          # version= se deriva del tag (v0.5.4 -> 0.5.4): sin esto el paquete
+          # se construiria siempre con la version hardcodeada del template.
+          VERSION="${GITHUB_REF_NAME#v}"
           sed -e "s|@TAG@|${TAG}|g" -e "s|@CHECKSUM@|${CHECKSUM}|g" \
+            -e "s|@VERSION@|${VERSION}|g" \
             void/template-prebuilt > template
           echo "--- template generado ---"
           cat template
