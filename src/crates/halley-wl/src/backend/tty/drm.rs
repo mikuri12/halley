@@ -1992,19 +1992,56 @@ fn direct_scanout_cursor_elements(
             else {
                 return Ok(Vec::new());
             };
-            let loc = (
-                sx.round() as i32 - sprite.hotspot_x,
-                sy.round() as i32 - sprite.hotspot_y,
-            );
+            // Dynamic cursors: apply the CPU transform (rotation / zoom /
+            // stretch) to the frame before uploading it as the scanout
+            // element buffer, and re-anchor the hotspot so the pointer stays
+            // under the transformed hotspot.
+            let dynamic_transform = cursor_manager.dynamic.shown();
             // Frame advance of the animated cursor (XCursor multi-frame).
             // elapsed is taken AFTER resolving the sprite (which primed the
             // animation).
             let elapsed_ms = cursor_manager.cursor_elapsed_ms();
             let frame_pixels = &sprite.frame_at(elapsed_ms).pixels_bgra;
+            let transformed_frame = if dynamic_transform.is_identity() {
+                None
+            } else {
+                let nearest = crate::render::dynamic_cursor::nearest_sampling_enabled(
+                    cursor_config.dynamic.shake.nearest,
+                    dynamic_transform.scale,
+                );
+                Some(crate::render::dynamic_cursor::transform_cursor_frame(
+                    frame_pixels,
+                    sprite.width,
+                    sprite.height,
+                    (sprite.hotspot_x, sprite.hotspot_y),
+                    &dynamic_transform,
+                    nearest,
+                ))
+            };
+            let (pixels, buf_w, buf_h, hotspot_x, hotspot_y) = match &transformed_frame {
+                Some(transformed) => (
+                    transformed.pixels.as_slice(),
+                    transformed.width,
+                    transformed.height,
+                    transformed.hotspot_x,
+                    transformed.hotspot_y,
+                ),
+                None => (
+                    frame_pixels.as_slice(),
+                    sprite.width,
+                    sprite.height,
+                    sprite.hotspot_x,
+                    sprite.hotspot_y,
+                ),
+            };
+            let loc = (
+                sx.round() as i32 - hotspot_x,
+                sy.round() as i32 - hotspot_y,
+            );
             let buffer = MemoryRenderBuffer::from_slice(
-                frame_pixels,
+                pixels,
                 Fourcc::Argb8888,
-                (sprite.width as i32, sprite.height as i32),
+                (buf_w as i32, buf_h as i32),
                 1,
                 Transform::Normal,
                 None,

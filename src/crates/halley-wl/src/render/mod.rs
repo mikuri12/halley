@@ -7,6 +7,7 @@ mod cluster_icon;
 mod cursor;
 mod cursor_theme;
 pub(crate) mod draw_primitives;
+pub(crate) mod dynamic_cursor;
 pub(crate) mod frame;
 mod icon_tint;
 pub mod layer_shell;

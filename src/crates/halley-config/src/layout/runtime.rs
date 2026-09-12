@@ -528,6 +528,48 @@ cursor:
   size 24
   hide-when-typing true
   hide-after-ms 2000
+
+  # Dynamic cursors (native port of hypr-dynamic-cursors): the cursor reacts
+  # to pointer motion. Disabled by default; flip `enabled` to opt in.
+  dynamic:
+    # enabled false
+    # mode "tilt"
+    # threshold 2
+
+    # mode "rotate": simulate a stick dragged on one end (rotates towards movement).
+    #rotate:
+    #  length 20
+    #  offset 0.0
+    #end
+
+    # mode "tilt": tilt based on horizontal speed (default).
+    #tilt:
+    #  activation "negative_quadratic"   # linear | quadratic | negative_quadratic
+    #  limit 5000    # px/s at which the full tilt is reached
+    #  window 100    # ms of history used for the speed
+    #  full 60       # full tilt angle per side, degrees
+    #end
+
+    # mode "stretch": comic-style stretch along the movement direction.
+    #stretch:
+    #  activation "negative_quadratic"
+    #  limit 3000
+    #  window 100
+    #end
+
+    # shake to find: magnify the cursor when it is shaken.
+    #shake:
+    #  enabled true
+    #  threshold 6.0
+    #  base 4.0
+    #  speed 4.0
+    #  influence 0.0
+    #  limit 0.0
+    #  timeout 2000
+    #  effects false  # keep tilt/rotate effects while shaking
+    #  nearest 1      # 0 never | 1 pixelated beyond texture size | 2 always
+    #end
+  end
 end
 
 # Keyboard repeat and pointer-driven focus behavior.

@@ -9,6 +9,8 @@ use smithay::input::pointer::{CursorIcon, CursorImageStatus};
 use smithay::utils::IsAlive;
 use xcursor::{CursorTheme, parser::Image};
 
+use super::dynamic_cursor;
+
 // ---------------------------------------------------------------------------
 // Sprite data (multi-frame support for animated XCursor cursors)
 // ---------------------------------------------------------------------------
@@ -135,6 +137,8 @@ pub(crate) struct CursorManager {
     anim: CursorAnimState,
     /// Último icono named resuelto, para detectar cambios y resetear la animación.
     last_named_icon: Option<CursorIcon>,
+    /// Estado de dynamic-cursors (rotación/tilt/stretch + shake to find).
+    pub(crate) dynamic: dynamic_cursor::DynamicCursorState,
 }
 
 impl Default for CursorManager {
@@ -144,6 +148,7 @@ impl Default for CursorManager {
             sprites: CursorSpriteManager::default(),
             anim: CursorAnimState::default(),
             last_named_icon: None,
+            dynamic: dynamic_cursor::DynamicCursorState::default(),
         }
     }
 }
@@ -204,6 +209,32 @@ impl CursorManager {
             };
         }
         Some(sprite)
+    }
+
+    // -- dynamic cursors ----------------------------------------------------
+
+    /// Motion-event update for the dynamic cursor simulation.
+    pub(crate) fn dynamic_on_move(
+        &mut self,
+        pos: (f64, f64),
+        delta: (f64, f64),
+        cfg: &halley_config::DynamicCursorConfig,
+    ) {
+        self.dynamic.on_move(pos, delta, cfg, Instant::now());
+    }
+
+    /// Per-frame tick for the dynamic cursor simulation.
+    pub(crate) fn dynamic_on_tick(
+        &mut self,
+        pos: (f64, f64),
+        cfg: &halley_config::DynamicCursorConfig,
+    ) {
+        self.dynamic.on_tick(pos, Instant::now(), cfg);
+    }
+
+    /// Resets the dynamic cursor simulation (config/mode changes).
+    pub(crate) fn dynamic_reset(&mut self) {
+        self.dynamic.reset();
     }
 }
 

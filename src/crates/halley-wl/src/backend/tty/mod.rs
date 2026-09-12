@@ -333,6 +333,20 @@ fn advance_tty_redraw_frame(
 
     crate::frame_loop::tick_frame_effects(st, now);
     crate::frame_loop::tick_animator_frame(st, now);
+    // Dynamic cursors: per-frame tick (tilt/stretch speed windows and shake
+    // detection), mirroring the upstream plugin's refresh-rate timer. Runs
+    // before the frame is queued so the freshly computed transform is what
+    // gets rendered.
+    {
+        let cursor_pos = {
+            let ps = pointer_state.borrow();
+            (ps.screen.0 as f64, ps.screen.1 as f64)
+        };
+        let dynamic_cfg = st.runtime.tuning.cursor.dynamic.clone();
+        st.platform
+            .cursor_manager
+            .dynamic_on_tick(cursor_pos, &dynamic_cfg);
+    }
     st.tick_fullscreen_motion(now);
     crate::frame_loop::begin_render_frame(st, now);
     {

@@ -77,6 +77,22 @@ impl RuntimeTuning {
         if self.cursor.theme.trim().is_empty() {
             self.cursor.theme = CursorConfig::default().theme;
         }
+        let d = &mut self.cursor.dynamic;
+        d.threshold_deg = d.threshold_deg.clamp(0.1, 45.0);
+        d.rotate.length = d.rotate.length.clamp(4.0, 512.0);
+        d.rotate.offset_deg = d.rotate.offset_deg.clamp(-360.0, 360.0);
+        d.tilt.limit_px_s = d.tilt.limit_px_s.clamp(100.0, 100_000.0);
+        d.tilt.window_ms = d.tilt.window_ms.clamp(16, 1_000);
+        d.tilt.full_deg = d.tilt.full_deg.clamp(1.0, 89.0);
+        d.stretch.limit_px_s = d.stretch.limit_px_s.clamp(100.0, 100_000.0);
+        d.stretch.window_ms = d.stretch.window_ms.clamp(16, 1_000);
+        d.shake.threshold = d.shake.threshold.clamp(1.0, 100.0);
+        d.shake.base = d.shake.base.clamp(1.0, 32.0);
+        d.shake.speed = d.shake.speed.clamp(0.0, 64.0);
+        d.shake.influence = d.shake.influence.clamp(0.0, 32.0);
+        d.shake.limit = d.shake.limit.clamp(0.0, 64.0);
+        d.shake.timeout_ms = d.shake.timeout_ms.clamp(0, 10_000);
+        d.shake.nearest = d.shake.nearest.min(2);
         self.font.size = self.font.size.clamp(8, 32);
         if self.font.family.trim().is_empty() {
             self.font.family = FontConfig::default().family;

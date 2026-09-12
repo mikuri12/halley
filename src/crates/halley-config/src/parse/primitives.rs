@@ -298,6 +298,15 @@ pub(crate) fn pick_u32(cfg: &RuneConfig, paths: &[&str], default: u32) -> u32 {
     default
 }
 
+pub(crate) fn pick_u8(cfg: &RuneConfig, paths: &[&str], default: u8) -> u8 {
+    for path in paths {
+        if let Ok(Some(v)) = cfg.get_optional::<u8>(path) {
+            return v;
+        }
+    }
+    default
+}
+
 pub(crate) fn pick_i32(cfg: &RuneConfig, paths: &[&str], default: i32) -> i32 {
     for path in paths {
         if let Ok(Some(v)) = cfg.get_optional::<i32>(path) {
