@@ -877,6 +877,76 @@ fn to_u8(v: f32) -> u8 {
 mod tests {
     use super::*;
 
+    #[test]
+    fn shake_simulation_user_config_never_goes_invisible() {
+        // Reproduce the user's setup: tilt mode + shake, 125Hz mouse events
+        // interleaved with 60Hz ticks, over 1.5s of vigorous shaking. The
+        // rendered transform must never be degenerate (NaN) and the zoom
+        // must grow monotonically once detected.
+        let mut c = DynamicCursorConfig {
+            enabled: true,
+            mode: DynamicCursorMode::Tilt,
+            ..DynamicCursorConfig::default()
+        };
+        c.tilt.limit_px_s = 5000.0;
+        c.tilt.full_deg = 60.0;
+        c.shake.base = 4.0;
+        c.shake.speed = 4.0;
+        c.shake.timeout_ms = 2000;
+
+        let mut state = DynamicCursorState::default();
+        let mut now = Instant::now();
+        let mut x = 960.0;
+        let mut dir = 1.0;
+        let mut last_scale = 1.0f32;
+        let mut max_scale = 1.0f32;
+
+        // 1.5s of shake: a motion event every 8ms, a tick every ~16.6ms.
+        // Small amplitude (~300px box) like a real "where is my cursor" shake.
+        let mut next_tick = now;
+        let end = now + std::time::Duration::from_millis(1500);
+        while now < end {
+            now += std::time::Duration::from_micros(8000);
+            let dx = dir * 55.0;
+            x += dx;
+            if x > 1110.0 {
+                dir = -1.0;
+            }
+            if x < 810.0 {
+                dir = 1.0;
+            }
+            state.on_move((x, 540.0), (dx, 0.0), &c, now);
+            if now >= next_tick {
+                state.on_tick((x, 540.0), now, &c);
+                let shown = state.shown();
+                assert!(
+                    shown.rotation.is_finite(),
+                    "rotation must stay finite, got {}",
+                    shown.rotation
+                );
+                assert!(
+                    shown.scale.is_finite() && shown.scale > 0.0,
+                    "scale must stay finite and positive, got {}",
+                    shown.scale
+                );
+                if shown.scale > 1.0 {
+                    // Once zooming, the cursor must not snap back to a
+                    // tiny/unzoomed size mid-shake.
+                    assert!(
+                        shown.scale >= last_scale - 0.05,
+                        "scale regressed mid-shake: {} after {}",
+                        shown.scale,
+                        last_scale
+                    );
+                }
+                last_scale = last_scale.max(shown.scale);
+                max_scale = max_scale.max(shown.scale);
+                next_tick += std::time::Duration::from_micros(16_667);
+            }
+        }
+        assert!(max_scale > 2.0, "shake should magnify, max was {max_scale}");
+    }
+
     fn cfg(mode: DynamicCursorMode) -> DynamicCursorConfig {
         DynamicCursorConfig {
             enabled: true,

@@ -1325,6 +1325,15 @@ pub(crate) fn queue_tty_drm_frame(
 
         st.input.interaction_state.suppress_layer_shell_configure = previous_monitor.is_some();
 
+        // Dynamic cursors: while magnified (shake-to-find) the cursor element
+        // resizes on every frame and can exceed the hardware cursor plane.
+        // Upstream locks software cursors while zooming for the same reason:
+        // render the cursor into the composed frame instead of the KMS cursor
+        // plane, and fall back from direct scanout (which has no composed
+        // texture to draw the cursor into).
+        let dynamic_cursor_zoomed =
+            st.platform.cursor_manager.dynamic.shown().scale > 1.0;
+
         let disable_direct_scanout =
             tty_env_flag("HALLEY_DISABLE_DIRECT_SCANOUT") || tty_env_flag("HALLEY_FORCE_COMPOSED");
         if !disable_direct_scanout
@@ -1432,7 +1441,8 @@ pub(crate) fn queue_tty_drm_frame(
         // callbacks; the old gate made it oscillate scanout<->GL every frame,
         // causing flicker and a measurable fps drop.
         let allow_direct_scanout = !disable_direct_scanout
-            && primary_render_node == output_render_node;
+            && primary_render_node == output_render_node
+            && !dynamic_cursor_zoomed;
         match allow_direct_scanout.then(|| {
             fullscreen_direct_scanout_candidate(
                 st,
@@ -1592,9 +1602,12 @@ pub(crate) fn queue_tty_drm_frame(
         let force_overlay_full_repaint =
             crate::frame_loop::monitor_overlay_requires_full_repaint(st, output_name);
         let force_full_repaint = force_overlay_full_repaint || animation_redraw.force_full_repaint;
+        // A zoomed dynamic cursor is drawn into the composed frame (software
+        // lock, see above): never hand it to the hardware cursor plane.
         let use_hw_cursor = tty_hw_cursor_enabled()
             && primary_render_node == output_render_node
-            && st.output_transform_for(output_name) == Transform::Normal;
+            && st.output_transform_for(output_name) == Transform::Normal
+            && !dynamic_cursor_zoomed;
         let texture_buffer = {
             let mut gpu_manager = gpu_manager.borrow_mut();
             let mut renderer =
