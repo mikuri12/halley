@@ -286,6 +286,13 @@ pub(crate) fn pick_f32(cfg: &RuneConfig, paths: &[&str], default: f32) -> f32 {
             return v;
         }
     }
+    // Quoted-number fallback: the rune lexer cannot tokenize values starting
+    // with '-', so negatives must be written quoted (see `opt_f64`).
+    for path in paths {
+        if let Some(v) = parse_quoted_f64(cfg, path) {
+            return v as f32;
+        }
+    }
     default
 }
 
@@ -311,6 +318,15 @@ pub(crate) fn pick_i32(cfg: &RuneConfig, paths: &[&str], default: i32) -> i32 {
     for path in paths {
         if let Ok(Some(v)) = cfg.get_optional::<i32>(path) {
             return v;
+        }
+    }
+    // Quoted-number fallback: the rune lexer cannot tokenize values starting
+    // with '-', so negatives must be written quoted (see `opt_f64`).
+    for path in paths {
+        if let Some(v) = parse_quoted_f64(cfg, path) {
+            if v.fract() == 0.0 && v.abs() <= i32::MAX as f64 {
+                return v as i32;
+            }
         }
     }
     default
@@ -360,7 +376,22 @@ pub(crate) fn opt_f64(cfg: &RuneConfig, paths: &[&str]) -> Option<f64> {
             return Some(v);
         }
     }
+    // The rune lexer cannot tokenize a value starting with '-' (numbers must
+    // begin with a digit), so negative values like `accel-speed -1.0` are a
+    // syntax error and must be written quoted: `accel-speed "-1.0"`. Fall
+    // back to parsing the quoted form here so the setting actually applies.
+    for path in paths {
+        if let Some(v) = parse_quoted_f64(cfg, path) {
+            return Some(v);
+        }
+    }
     None
+}
+
+/// Parses a quoted numeric value (e.g. `accel-speed "-1.0"`).
+fn parse_quoted_f64(cfg: &RuneConfig, path: &str) -> Option<f64> {
+    let raw = cfg.get_optional::<String>(path).ok().flatten()?;
+    raw.trim().trim_matches('"').trim().parse::<f64>().ok()
 }
 
 pub(crate) fn opt_accel_profile(cfg: &RuneConfig, paths: &[&str]) -> Option<AccelProfile> {

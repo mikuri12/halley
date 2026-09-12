@@ -1408,6 +1408,7 @@ input:
   mouse:
     natural-scroll false
     accel-profile "flat"
+    accel-speed "-0.5"
     scroll-button 274
   end
   devices:

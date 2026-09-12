@@ -713,6 +713,32 @@ end
     }
 
     #[test]
+    fn negative_accel_speed_parses_quoted() {
+        // The rune lexer cannot tokenize a leading '-', so negative libinput
+        // values must be quoted. The pickers must parse the quoted form.
+        let cfg = RuneConfig::from_str(
+            r#"
+input:
+  mouse:
+    accel-speed "-1.0"
+    accel-profile "flat"
+  end
+  touchpad:
+    accel-speed "-0.35"
+  end
+end
+"#,
+        )
+        .expect("input device config with quoted negative accel should parse");
+
+        let mut out = RuntimeTuning::default();
+        load_input_section(&cfg, &mut out);
+
+        assert_eq!(out.input.mouse.accel_speed, Some(-1.0));
+        assert_eq!(out.input.touchpad.accel_speed, Some(-0.35));
+    }
+
+    #[test]
     fn input_device_sections_default_to_unset() {
         let tuning = RuntimeTuning::default();
         assert_eq!(
