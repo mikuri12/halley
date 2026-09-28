@@ -287,23 +287,41 @@ pub(crate) fn tty_output_animation_redraw_state(
     // is resolved on the first render (on pointer move); after that this flag
     // stays true and the scheduler keeps continuous redraws while the animated
     // cursor is active.
+    //
+    // Fix (CPU en reposo): el flag anterior quedaba `true` para siempre con un
+    // tema animado (MikuCat anima TODOS los iconos, 3 frames x 100 ms), lo que
+    // obligaba a renderizar a 60 fps aunque el cursor estuviera OCULTO por
+    // `hide-after-ms`, `hide-when-typing` o navegación por teclado. Un cursor
+    // invisible no cambia de frame visible, asi que no debe sostener redraws.
+    // Se usa `effective_cursor_image_status` (la misma que consulta el
+    // renderer) en lugar de `cursor_image()` (estado crudo que ignora el
+    // ocultamiento).
     let cursor_named_animation_active = matches!(
-        st.platform.cursor_manager.cursor_image(),
+        st.effective_cursor_image_status(),
         CursorImageStatus::Named(_)
-    ) && st.platform.cursor_manager.named_cursor_is_animated();
+    ) && st.platform.cursor_manager.named_cursor_is_animated()
+        // Fix (CPU en reposo): antes este flag sostenia redraws continuos al
+        // refresh del monitor mientras el cursor Named fuera animado. Ahora
+        // solo "activa" mientras quede un frame SIN dibujar: con MikuCat
+        // (3 frames x 100 ms) el scheduler redibuja a 10 fps mientras el
+        // cursor es visible, y deja de pedir frames en cuanto el frame
+        // actual ya esta en pantalla (o el cursor esta oculto).
+        && st
+            .platform
+            .cursor_manager
+            .cursor_animation_frame_pending();
     // Dynamic cursors (rotation/tilt/stretch decay or shake magnification in
     // flight): keep continuous redraws on the outputs so the transform keeps
     // animating even when the pointer itself is stationary.
     let dynamic_cursor_active = st.runtime.tuning.cursor.dynamic.enabled
         && matches!(
-            st.platform.cursor_manager.cursor_image(),
+            // Mismo fix que cursor_named_animation_active: el estado crudo
+            // `cursor_image()` ignora el ocultamiento (hide-after-ms, typing,
+            // keyboard-nav); el cursor invisible no decae visiblemente.
+            st.effective_cursor_image_status(),
             CursorImageStatus::Named(_)
         )
-        && st
-            .platform
-            .cursor_manager
-            .dynamic
-            .animation_active(std::time::Instant::now());
+        && st.platform.cursor_manager.dynamic.animation_active(now);
     let active = fade_related
         || cluster_tile_active
         || close_window_active

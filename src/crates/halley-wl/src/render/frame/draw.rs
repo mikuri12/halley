@@ -1259,15 +1259,20 @@ pub(super) fn draw_cursor_layer(
             smithay::input::pointer::CursorImageStatus::Hidden => false,
             smithay::input::pointer::CursorImageStatus::Named(icon) => {
                 if let Some(sprite) = cursor_manager.sprite_with_fallback(cursor_config, *icon) {
+                    let elapsed_ms = cursor_manager.cursor_elapsed_ms();
                     draw_cursor_sprite(
                         frame,
                         damage,
                         (sx, sy),
                         sprite.as_ref(),
-                        cursor_manager.cursor_elapsed_ms(),
+                        elapsed_ms,
                         &dynamic_transform,
                         cursor_config.dynamic.shake.nearest,
                     )?;
+                    // Informar al scheduler de qué frame se dibuja (apaga los
+                    // redraws continuos hasta el próximo cambio de frame real).
+                    cursor_manager
+                        .mark_cursor_animation_frame_rendered(sprite.frame_index_at(elapsed_ms));
                     false
                 } else {
                     true

@@ -2288,13 +2288,45 @@ pub(crate) fn run_tty_backend() -> Result<(), Box<dyn Error>> {
                         .cloned()
                         .collect();
 
-                    if !due_outputs.is_empty() || !st.runtime.tty_redraw_outputs.is_empty() {
-                        let animation_redraw_active = tty_animation_redraw_active(
-                            st,
-                            &outputs_for_timer,
-                            &pointer_state_for_timer,
-                            now,
-                        );
+                    // Fix (CPU en reposo): los frame-callbacks pendientes de
+                    // los CLIENTES (noctalia pide uno tras otro) no son daño ni
+                    // contenido nuevo: son una petición de "avísame cuando
+                    // presentes". Antes esto forzaba un render completo por cada
+                    // tick del timer (60 fps constantes) solo para entregar el
+                    // callback. Ahora solo renderizamos si además hay trabajo
+                    // real del compositor: un redraw pedido (commit/input) o
+                    // una animación activa. Si no lo hay, los callbacks se
+                    // agendan por la vía barata: schedule_estimated_frame_callback
+                    // los entregará en el próximo vblank estimado SIN render,
+                    // y si el cliente responde con un commit, el fd del display
+                    // despierta el loop y el frame real los entrega.
+                    let animation_redraw_active = tty_animation_redraw_active(
+                        st,
+                        &outputs_for_timer,
+                        &pointer_state_for_timer,
+                        now,
+                    );
+                    let compositor_work_pending =
+                        !st.runtime.tty_redraw_outputs.is_empty() || animation_redraw_active;
+
+                    if !frame_callback_due_outputs.is_empty() && !compositor_work_pending {
+                        let outputs_for_estimated = outputs_for_timer.borrow();
+                        for output_name in &frame_callback_due_outputs {
+                            if let Some(output) = outputs_for_estimated
+                                .iter()
+                                .find(|output| output.connector_name == *output_name)
+                            {
+                                schedule_estimated_frame_callback(
+                                    &estimated_frame_callbacks_for_timer,
+                                    &frame_clocks_for_timer,
+                                    output,
+                                    now,
+                                );
+                            }
+                        }
+                    }
+
+                    if compositor_work_pending {
                         let mut eligible_outputs = take_ready_tty_redraw_outputs(
                             &backend_handle_for_timer,
                             &outputs_for_timer,
@@ -2388,8 +2420,14 @@ pub(crate) fn run_tty_backend() -> Result<(), Box<dyn Error>> {
                 // (display fd, libinput, DRM vblank, pings), so at rest a slow
                 // guard tick suffices for the lazy paths: child reap, IPC, the
                 // config watch and the stuck-frame timeout.
+                //
+                // Fix (CPU en reposo): `!spawned_children.is_empty()` mantenía
+                // `busy == true` para siempre — noctalia, pipewire y
+                // xwayland-satellite son hijos vivos de larga vida que nunca
+                // salen del Vec, asi que el timer nunca bajaba al tick idle de
+                // 100 ms. El reap de hijos que SI terminan funciona igual con
+                // el tick lento (se recogen en <= 100 ms).
                 let busy = !st.runtime.tty_redraw_outputs.is_empty()
-                    || !st.runtime.spawned_children.is_empty()
                     || !estimated_frame_callbacks_for_timer.borrow().is_empty()
                     || output_frame_pending_for_dpms_timer
                         .borrow()
@@ -2407,7 +2445,34 @@ pub(crate) fn run_tty_backend() -> Result<(), Box<dyn Error>> {
                 if busy {
                     TimeoutAction::ToDuration(frame_interval)
                 } else {
-                    TimeoutAction::ToDuration(Duration::from_millis(IDLE_TICK_MS))
+                    // Fix (fluidez + CPU): en reposo el tick de guardia de 100 ms
+                    // es suficiente para todo MENOS para el cursor animado: sus
+                    // frames cambian cada ~100 ms y un tick tarde haria la
+                    // animacion entrecortada. Si el cursor Named visible es
+                    // animado, re-armar el timer justo ANTES del proximo cambio
+                    // de frame (con ~2 ms de colchon, acotado al tick de guardia)
+                    // para que el scheduler redibuje a la tasa real de la
+                    // animacion (MikuCat: 10 fps) en vez de sostener 60 fps.
+                    let cursor_frame_deadline = if st
+                        .platform
+                        .cursor_manager
+                        .named_cursor_is_animated()
+                        && matches!(
+                            st.effective_cursor_image_status(),
+                            smithay::input::pointer::CursorImageStatus::Named(_)
+                        ) {
+                        st.platform
+                            .cursor_manager
+                            .cursor_animation_next_frame_in_ms()
+                    } else {
+                        None
+                    };
+                    match cursor_frame_deadline.map(|ms| ms.saturating_sub(2).max(1)) {
+                        Some(ms) => TimeoutAction::ToDuration(Duration::from_millis(
+                            ms.min(IDLE_TICK_MS),
+                        )),
+                        None => TimeoutAction::ToDuration(Duration::from_millis(IDLE_TICK_MS)),
+                    }
                 }
             })?;
 

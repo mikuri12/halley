@@ -2014,7 +2014,12 @@ fn direct_scanout_cursor_elements(
             // elapsed is taken AFTER resolving the sprite (which primed the
             // animation).
             let elapsed_ms = cursor_manager.cursor_elapsed_ms();
+            let frame_index = sprite.frame_index_at(elapsed_ms);
             let frame_pixels = &sprite.frame_at(elapsed_ms).pixels_bgra;
+            // Informar al scheduler de qué frame se dibuja: es lo que apaga
+            // los redraws continuos cuando la animación no ha cambiado de
+            // frame (cursor_animation_frame_pending).
+            cursor_manager.mark_cursor_animation_frame_rendered(frame_index);
             let transformed_frame = if dynamic_transform.is_identity() {
                 None
             } else {
