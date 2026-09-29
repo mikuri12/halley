@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # Compilamos DENTRO de un contenedor Void, no en el runner Ubuntu.
       # Un binario linkeado contra las libs de Ubuntu no arranca en Void:
@@ -105,7 +105,7 @@ jobs:
           cat template
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: halley-binaries-x86_64
           path: |
@@ -159,7 +159,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # Historia completa: sin esto el merge no encuentra la base comun.
           fetch-depth: 0
