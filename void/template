@@ -36,7 +36,7 @@ homepage="https://github.com/mikuri12/halley"
 # "cambio checksum -> muevo tag -> checksum cambia" es lo que rompía el build.
 # Para una nueva versión: crear un tag NUEVO, no re-apuntar este.
 distfiles="https://github.com/mikuri12/halley/archive/refs/tags/v0.8.0-mikuri.1.tar.gz"
-checksum="0000000000000000000000000000000000000000000000000000000000000000"
+checksum="268d79cc88753b516c6be4048971ef56cd94fe568f7df55c2bad6a2be02e03bb"
 # Para re-pinear a un tag futuro, reemplazar la URL y recalcular:
 #   curl -sL <url> | sha256sum
 
