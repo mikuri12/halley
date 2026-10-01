@@ -418,6 +418,7 @@ pub(crate) fn window_visual_state_with_cluster_presentation(
             font,
             now,
             None,
+            None,
         )
     {
         let source = source_geometry.to_physical(1);
