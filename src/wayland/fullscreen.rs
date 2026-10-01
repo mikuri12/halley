@@ -207,6 +207,10 @@ impl FullscreenPresentation {
 
 pub struct FullscreenManager {
     animations: Animations,
+    /// Presentation policy from the `fullscreen:` config section. Currently
+    /// only `preserve_top_panels` lives here; the animation settings stay in
+    /// `animations` above.
+    policy: halley_config::Fullscreen,
     windows: HashMap<WlSurface, FullscreenWindow>,
 }
 
@@ -214,8 +218,24 @@ impl FullscreenManager {
     pub fn new(animations: Animations) -> Self {
         Self {
             animations,
+            policy: halley_config::Fullscreen::default(),
             windows: HashMap::new(),
         }
+    }
+
+    /// Applies a freshly parsed `fullscreen:` policy section. Returns
+    /// `true` when the panel-preservation behavior changed, so callers can
+    /// schedule the redraws that reveal or cover the Top layer again.
+    pub(crate) fn reload_policy(&mut self, policy: halley_config::Fullscreen) -> bool {
+        let changed = self.policy.preserve_top_panels != policy.preserve_top_panels;
+        self.policy = policy;
+        changed
+    }
+
+    /// Whether anchored, exclusive-zone Top layer-shell panels (status bars)
+    /// stay visible above fullscreen windows on this output.
+    pub fn panels_preserved(&self) -> bool {
+        self.policy.preserve_top_panels
     }
 
     /// Parks a fullscreen presentation when explicit navigation selects a

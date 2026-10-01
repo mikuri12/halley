@@ -561,8 +561,9 @@ pub fn build(
     // Native XDG and X11 override-redirect popups use a desktop popup plane.
     // It sits in front of panels (`Layer::Top`) so menus are not clipped by a
     // status bar, while overlay surfaces and compositor UI remain authoritative.
-    let popup_foreground_index = elements.len();
-    if !request.desktop.fullscreen.covers_top_matching(
+    // With `fullscreen.preserve-top-panels`, anchored status bars stay visible
+    // above fullscreen windows (niri-style panel layering).
+    let fullscreen_covers_top = request.desktop.fullscreen.covers_top_matching(
         request.desktop.focused,
         output,
         request.frame.target_presentation_time,
@@ -575,7 +576,9 @@ pub fn build(
                 request.frame.target_presentation_time,
             )
         },
-    ) {
+    ) && !request.desktop.fullscreen.panels_preserved();
+    let popup_foreground_index = elements.len();
+    if !fullscreen_covers_top {
         elements.extend(layer_surface_scene_elements(
             renderer,
             output,

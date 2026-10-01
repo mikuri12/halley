@@ -68,6 +68,34 @@ pub struct WindowRule {
     pub blur: Option<bool>,
     pub spawn_placement: WindowSpawnPlacement,
     pub cluster_participation: WindowClusterParticipation,
+    /// Per-window decoration overrides (theming); `None` keeps the global
+    /// `decorations:` settings for this window.
+    pub decoration: Option<WindowDecorationTheme>,
+}
+
+/// Per-window decoration theming, set from a window rule's `decoration:`
+/// block. This is Halley's answer to labwc's per-window theme XML: the same
+/// expressiveness, in the config language the compositor already speaks.
+///
+/// Every field is optional; unset fields inherit the global `decorations:`
+/// values.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WindowDecorationTheme {
+    pub border_size_px: Option<i32>,
+    pub border_radius_px: Option<i32>,
+    pub border_color_focused: Option<halley_config::BorderColor>,
+    pub border_color_unfocused: Option<halley_config::BorderColor>,
+    pub secondary_border: Option<SecondaryBorderTheme>,
+}
+
+/// Per-window secondary-border overrides.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SecondaryBorderTheme {
+    pub enabled: Option<bool>,
+    pub size_px: Option<i32>,
+    pub gap_px: Option<i32>,
+    pub color_focused: Option<halley_config::BorderColor>,
+    pub color_unfocused: Option<halley_config::BorderColor>,
 }
 
 /// One protocol layer that a layer-shell rule may match.
@@ -196,6 +224,7 @@ fn parse_rule(fields: &[ObjectItem]) -> Result<WindowRule, WindowRuleParseError>
                 | "spawn_placement"
                 | "cluster-participation"
                 | "cluster_participation"
+                | "decoration"
         ) {
             return Err(WindowRuleParseError(format!(
                 "unknown window rule key {key:?}"
@@ -286,6 +315,11 @@ fn parse_rule(fields: &[ObjectItem]) -> Result<WindowRule, WindowRuleParseError>
             },
         };
 
+    let decoration = field(fields, &["decoration"])
+        .map(|value| parse_decoration_theme(value))
+        .transpose()?
+        .flatten();
+
     Ok(WindowRule {
         app_ids,
         titles,
@@ -294,7 +328,139 @@ fn parse_rule(fields: &[ObjectItem]) -> Result<WindowRule, WindowRuleParseError>
         blur,
         spawn_placement,
         cluster_participation,
+        decoration,
     })
+}
+
+/// Parses one window rule's `decoration:` block. Returns `Ok(None)` when the
+/// block is present but empty (inherit everything).
+fn parse_decoration_theme(
+    value: &Value,
+) -> Result<Option<WindowDecorationTheme>, WindowRuleParseError> {
+    let Value::Object(fields) = value else {
+        return Err(WindowRuleParseError(
+            "window rule decoration must be an object".to_string(),
+        ));
+    };
+    for item in fields {
+        let ObjectItem::Assign(key, _) = item else {
+            return Err(WindowRuleParseError(
+                "conditionals are not supported inside a decoration block".to_string(),
+            ));
+        };
+        if !matches!(
+            key.as_str(),
+            "border-size"
+                | "border_size"
+                | "radius"
+                | "colour-focused"
+                | "colour-focused"
+                | "color-focused"
+                | "colour-unfocused"
+                | "color-unfocused"
+                | "secondary-border"
+        ) {
+            return Err(WindowRuleParseError(format!(
+                "unknown decoration key {key:?}"
+            )));
+        }
+    }
+    let mut theme = WindowDecorationTheme::default();
+    theme.border_size_px = field(fields, &["border-size", "border_size"])
+        .map(|value| number(value, "border-size").map(|value| value as i32))
+        .transpose()?
+        .filter(|size| *size >= 0);
+    theme.border_radius_px = field(fields, &["radius"])
+        .map(|value| number(value, "radius").map(|value| value as i32))
+        .transpose()?
+        .filter(|radius| *radius >= 0);
+    for (slot, names) in [
+        (
+            &mut theme.border_color_focused,
+            &["colour-focused", "color-focused"] as &[&str],
+        ),
+        (
+            &mut theme.border_color_unfocused,
+            &["colour-unfocused", "color-unfocused"],
+        ),
+    ] {
+        if let Some(value) = field(fields, names) {
+            *slot = Some(border_color(value, names[0])?);
+        }
+    }
+    if let Some(value) = field(fields, &["secondary-border"]) {
+        theme.secondary_border = Some(parse_secondary_border_theme(value)?);
+    }
+    Ok(Some(theme))
+}
+
+fn parse_secondary_border_theme(
+    value: &Value,
+) -> Result<SecondaryBorderTheme, WindowRuleParseError> {
+    let Value::Object(fields) = value else {
+        return Err(WindowRuleParseError(
+            "window rule secondary-border must be an object".to_string(),
+        ));
+    };
+    for item in fields {
+        let ObjectItem::Assign(key, _) = item else {
+            return Err(WindowRuleParseError(
+                "conditionals are not supported inside a secondary-border block".to_string(),
+            ));
+        };
+        if !matches!(
+            key.as_str(),
+            "enabled"
+                | "size"
+                | "gap"
+                | "colour-focused"
+                | "color-focused"
+                | "colour-unfocused"
+                | "color-unfocused"
+        ) {
+            return Err(WindowRuleParseError(format!(
+                "unknown secondary-border key {key:?}"
+            )));
+        }
+    }
+    let mut theme = SecondaryBorderTheme::default();
+    theme.enabled = field(fields, &["enabled"])
+        .map(|value| boolean(value, "enabled"))
+        .transpose()?;
+    theme.size_px = field(fields, &["size"])
+        .map(|value| number(value, "size").map(|value| value as i32))
+        .transpose()?
+        .filter(|size| *size >= 0);
+    theme.gap_px = field(fields, &["gap"])
+        .map(|value| number(value, "gap").map(|value| value as i32))
+        .transpose()?
+        .filter(|gap| *gap >= 0);
+    for (slot, names) in [
+        (
+            &mut theme.color_focused,
+            &["colour-focused", "color-focused"] as &[&str],
+        ),
+        (
+            &mut theme.color_unfocused,
+            &["colour-unfocused", "color-unfocused"],
+        ),
+    ] {
+        if let Some(value) = field(fields, names) {
+            *slot = Some(border_color(value, names[0])?);
+        }
+    }
+    Ok(theme)
+}
+
+/// Parses a `#rrggbb` string into a BorderColor.
+fn border_color(value: &Value, name: &str) -> Result<halley_config::BorderColor, WindowRuleParseError> {
+    let text = string(value, name)?;
+    let parsed = halley_config::BorderColor::parse_hex(&text).ok_or_else(|| {
+        WindowRuleParseError(format!(
+            "{name} must be \"#rrggbb\", got {text:?}"
+        ))
+    })?;
+    Ok(parsed)
 }
 
 fn parse_layer_rule(fields: &[ObjectItem]) -> Result<LayerRule, WindowRuleParseError> {

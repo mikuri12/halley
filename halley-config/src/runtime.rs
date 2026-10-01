@@ -7,13 +7,13 @@ use rune_cfg::RuneConfig;
 use crate::{
     Animations, Apogee, Autostart, Background, BackgroundParseError, Bearings, Clusters, Cursor,
     Debug, Decay, Decorations, Effects, EffectsParseError, Field, FieldParseError, FocusRings,
-    Font, Input, InputParseError, Keybinds, LaunchConfigError, LayerRule, NodeParseError, Nodes,
-    OutputConfig, OverlayParseError, Overlays, Physics, Screenshot, Trail, WindowRule,
-    WindowRuleParseError, parse_animations, parse_apogee, parse_autostart, parse_background,
-    parse_bearings, parse_clusters, parse_cursor, parse_debug, parse_decay, parse_decorations,
-    parse_effects, parse_env, parse_field_checked, parse_font, parse_input, parse_keybinds,
-    parse_nodes_checked, parse_overlays_checked, parse_physics, parse_rules, parse_screenshot,
-    parse_trail, parse_view_checked,
+    Font, Fullscreen, Input, InputParseError, Keybinds, LaunchConfigError, LayerRule,
+    NodeParseError, Nodes, OutputConfig, OverlayParseError, Overlays, Physics, Screenshot, Trail,
+    WindowRule, WindowRuleParseError, parse_animations, parse_apogee, parse_autostart,
+    parse_background, parse_bearings, parse_clusters, parse_cursor, parse_debug, parse_decay,
+    parse_decorations, parse_effects, parse_env, parse_field_checked, parse_font, parse_fullscreen,
+    parse_input, parse_keybinds, parse_nodes_checked, parse_overlays_checked, parse_physics,
+    parse_rules, parse_screenshot, parse_trail, parse_view_checked,
 };
 use crate::{ViewConfig, ViewParseError};
 
@@ -46,6 +46,7 @@ pub struct RuntimeConfig {
     pub overlays: Overlays,
     pub effects: Effects,
     pub debug: Debug,
+    pub fullscreen: Fullscreen,
     pub outputs: Vec<OutputConfig>,
 }
 
@@ -181,6 +182,7 @@ pub fn parse_runtime_config(config: &RuneConfig) -> Result<RuntimeConfig, Runtim
         overlays: parse_overlays_checked(config)?,
         effects: parse_effects(config)?,
         debug: parse_debug(config),
+        fullscreen: parse_fullscreen(config),
         outputs,
     })
 }

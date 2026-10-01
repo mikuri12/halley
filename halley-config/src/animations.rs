@@ -203,6 +203,25 @@ pub struct FullscreenAnimation {
     pub motion: AnimationMotion,
 }
 
+/// Fullscreen presentation policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fullscreen {
+    pub animation: FullscreenAnimation,
+    /// Keep anchored, exclusive-zone Top layer-shell surfaces (status bars
+    /// such as Noctalia Shell) visible above fullscreen windows instead of
+    /// covering the whole output. Mirrors niri's layer handling for panels.
+    pub preserve_top_panels: bool,
+}
+
+impl Default for Fullscreen {
+    fn default() -> Self {
+        Self {
+            animation: FullscreenAnimation::default(),
+            preserve_top_panels: false,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NodeAnimation {
     pub enabled: bool,
@@ -551,6 +570,25 @@ pub fn load_animations() -> Animations {
             eprintln!("animations: failed to load {path:?}, using defaults: {err}");
             Animations::default()
         }
+    }
+}
+
+/// Parses the `fullscreen:` presentation policy section.
+pub fn parse_fullscreen(config: &RuneConfig) -> Fullscreen {
+    let defaults = Fullscreen::default();
+    Fullscreen {
+        animation: FullscreenAnimation {
+            enabled: config.get_or("animations.fullscreen.enabled", defaults.animation.enabled),
+            motion: AnimationMotion::parse(
+                config,
+                "animations.fullscreen",
+                defaults.animation.motion,
+            ),
+        },
+        preserve_top_panels: config.get_or(
+            "fullscreen.preserve-top-panels",
+            defaults.preserve_top_panels,
+        ),
     }
 }
 

@@ -274,6 +274,22 @@ pub(super) fn live_window_elements(
                 .clusters
                 .join_ready_for(member, &context.output.name())
         });
+    // Per-window decoration theming: a window rule with a `decoration:`
+    // block overrides the global border/secondary-border settings for this
+    // window only. The resolved rule is cached per surface, so this is a
+    // cheap lookup that returns None for windows without a matching rule.
+    let resolved_rule = context.window_rules.applied(window_surface.as_ref());
+    let themed_decorations;
+    let decorations = if let Some(theme) = resolved_rule.decoration.as_ref() {
+        themed_decorations = apply_decoration_theme(context.decorations, theme);
+        &themed_decorations
+    } else {
+        context.decorations
+    };
+    let context = LiveWindowContext {
+        decorations,
+        ..context
+    };
     let Some(visual) = window_visual_state_with_cluster_presentation(
         context.space,
         context.cameras,
@@ -1220,6 +1236,47 @@ fn color_bytes(color: halley_config::BorderColor) -> [u8; 3] {
         (color.g.clamp(0.0, 1.0) * 255.0).round() as u8,
         (color.b.clamp(0.0, 1.0) * 255.0).round() as u8,
     ]
+}
+
+/// Applies a window rule's `decoration:` theme on top of the global
+/// decorations. Unset fields keep the global value.
+fn apply_decoration_theme(
+    base: &halley_config::Decorations,
+    theme: &halley_config::WindowDecorationTheme,
+) -> halley_config::Decorations {
+    let mut out = base.clone();
+    if let Some(size) = theme.border_size_px {
+        out.border_width_px = size;
+    }
+    if let Some(radius) = theme.border_radius_px {
+        out.border_radius_px = radius;
+    }
+    if let Some(color) = theme.border_color_focused {
+        out.border_color_focused = color;
+    }
+    if let Some(color) = theme.border_color_unfocused {
+        out.border_color_unfocused = color;
+    }
+    if let Some(secondary) = theme.secondary_border.as_ref() {
+        let mut merged = out.secondary_border;
+        if let Some(enabled) = secondary.enabled {
+            merged.enabled = enabled;
+        }
+        if let Some(size) = secondary.size_px {
+            merged.size_px = size;
+        }
+        if let Some(gap) = secondary.gap_px {
+            merged.gap_px = gap;
+        }
+        if let Some(color) = secondary.color_focused {
+            merged.color_focused = color;
+        }
+        if let Some(color) = secondary.color_unfocused {
+            merged.color_unfocused = color;
+        }
+        out.secondary_border = merged;
+    }
+    out
 }
 
 struct FittedTitle {

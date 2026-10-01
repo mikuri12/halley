@@ -536,6 +536,7 @@ impl<D: SessionDriver> Session<D> {
         let clusters_redraw = self
             .clusters
             .reload(config.clusters, config.animations.cluster);
+        let fullscreen_policy_changed = self.fullscreen.reload_policy(config.fullscreen);
         let font_redraw = self.render.ui_text.reload_font(&config.font);
         self.settings.reload_non_input(config);
         if decorations_changed {
@@ -577,6 +578,7 @@ impl<D: SessionDriver> Session<D> {
             || font_redraw
             || fullscreen_redraw
             || maximize_redraw
+            || fullscreen_policy_changed
         {
             self.request_redraw();
         }

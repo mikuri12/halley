@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 
-use halley_config::{WindowClusterParticipation, WindowRule, WindowSpawnPlacement};
+use halley_config::{
+    WindowClusterParticipation, WindowDecorationTheme, WindowRule, WindowSpawnPlacement,
+};
 use smithay::desktop::Window;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::XdgToplevelSurfaceData;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedWindowRule {
     pub initial_size: Option<(u32, u32)>,
     pub opacity: f32,
@@ -15,6 +17,8 @@ pub struct ResolvedWindowRule {
     pub spawn_placement: WindowSpawnPlacement,
     pub cluster_participation: WindowClusterParticipation,
     pub matched: bool,
+    /// Per-window decoration theming; `None` inherits the global settings.
+    pub decoration: Option<WindowDecorationTheme>,
 }
 
 impl Default for ResolvedWindowRule {
@@ -26,6 +30,7 @@ impl Default for ResolvedWindowRule {
             spawn_placement: WindowSpawnPlacement::Default,
             cluster_participation: WindowClusterParticipation::Layout,
             matched: false,
+            decoration: None,
         }
     }
 }
@@ -65,6 +70,7 @@ impl WindowRulesState {
                 spawn_placement: rule.spawn_placement,
                 cluster_participation: rule.cluster_participation,
                 matched: true,
+                decoration: rule.decoration.clone(),
             })
             .unwrap_or_default()
     }
@@ -78,7 +84,10 @@ impl WindowRulesState {
     }
 
     pub fn applied(&self, surface: &WlSurface) -> ResolvedWindowRule {
-        self.applied.get(surface).copied().unwrap_or_default()
+        self.applied
+            .get(surface)
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub fn opacity(&self, surface: &WlSurface) -> f32 {

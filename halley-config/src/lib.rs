@@ -30,10 +30,10 @@ pub mod zoom;
 
 pub use animations::{
     AnimationCurve, AnimationMotion, Animations, ArrangeAnimation, ClusterAnimation,
-    ClusterStackingAnimation, ClusterTilingAnimation, EasingMotion, FullscreenAnimation,
+    ClusterStackingAnimation, ClusterTilingAnimation, EasingMotion, Fullscreen, FullscreenAnimation,
     MaximizeAnimation, NodeAnimation, SmoothResizeAnimation, SpringMotion, WindowCloseAnimation,
     WindowCloseAnimationType, WindowOpenAnimation, WindowOpenAnimationType, load_animations,
-    parse_animations,
+    parse_animations, parse_fullscreen,
 };
 pub use apogee::{Apogee, parse_apogee};
 pub use background::{
@@ -90,8 +90,9 @@ pub use overlays::{
 pub use parse::{ParseError, parse_keybinds};
 pub use physics::{Physics, parse_physics};
 pub use rules::{
-    LayerRule, LayerShellLayer, RulePattern, Rules, WindowClusterParticipation, WindowRule,
-    WindowRuleParseError, WindowRulePattern, WindowSpawnPlacement, parse_rules, parse_window_rules,
+    LayerRule, LayerShellLayer, RulePattern, Rules, SecondaryBorderTheme, WindowClusterParticipation,
+    WindowDecorationTheme, WindowRule, WindowRuleParseError, WindowRulePattern,
+    WindowSpawnPlacement, parse_rules, parse_window_rules,
 };
 pub use runtime::{
     RuntimeConfig, RuntimeConfigError, load_runtime_config_at, load_runtime_config_diagnostic_at,

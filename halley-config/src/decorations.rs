@@ -408,6 +408,14 @@ fn parse_hex_rgb(value: &str) -> Option<(f32, f32, f32)> {
     Some((r, g, b))
 }
 
+impl BorderColor {
+    /// Parses `#rrggbb` / `#rgb` into a `BorderColor`. Shared with the
+    /// window-rule decoration theming so both spellings stay identical.
+    pub fn parse_hex(value: &str) -> Option<Self> {
+        parse_hex_rgb(value.trim()).map(|(r, g, b)| Self { r, g, b })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

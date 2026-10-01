@@ -292,7 +292,7 @@ pub fn route_to_client(
         return Some(route);
     }
 
-    if !context
+    if !(context
         .fullscreen
         .covers_top_matching(context.focused, output, context.now, |surface| {
             crate::presentation::surface_workspace_is_active(
@@ -302,7 +302,7 @@ pub fn route_to_client(
                 &output.name(),
                 context.now,
             )
-        })
+        }) && !context.fullscreen.panels_preserved())
         && let Some((layer, focus)) =
             layer_under(output, output_geometry.loc, output_local, [Layer::Top])
     {

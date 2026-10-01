@@ -19,6 +19,7 @@ pub struct RuntimeSettings {
     pub zoom: halley_config::Zoom,
     pub screenshot: halley_config::Screenshot,
     pub debug: halley_config::Debug,
+    pub fullscreen_policy: halley_config::Fullscreen,
     pub layer_rules: Vec<halley_config::LayerRule>,
 }
 
@@ -51,6 +52,7 @@ impl RuntimeSettings {
             zoom: config.field.zoom,
             screenshot: config.screenshot.clone(),
             debug: config.debug,
+            fullscreen_policy: config.fullscreen,
             layer_rules: config.layer_rules.clone(),
         }
     }
@@ -65,6 +67,7 @@ impl RuntimeSettings {
             || self.field.pins != config.field.pins
             || self.configured_overlays != config.overlays
             || self.debug != config.debug
+            || self.fullscreen_policy != config.fullscreen
             || self.layer_rules != config.layer_rules
     }
 
@@ -86,6 +89,7 @@ impl RuntimeSettings {
         self.zoom = config.field.zoom;
         self.screenshot = config.screenshot.clone();
         self.debug = config.debug;
+        self.fullscreen_policy = config.fullscreen;
         self.layer_rules.clone_from(&config.layer_rules);
     }
 
