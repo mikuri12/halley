@@ -1,0 +1,176 @@
+name: Build Release Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - dev
+  workflow_dispatch:
+
+# Necesario para que el GITHUB_TOKEN pueda crear releases y subir assets.
+# Por defecto el token es de solo lectura y softprops/action-gh-release
+# falla con "GitHub release failed with status: 403".
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # Compilamos DENTRO de un contenedor Void, no en el runner Ubuntu.
+      # Un binario linkeado contra las libs de Ubuntu no arranca en Void:
+      # las sonames no coinciden (libinput.so.10, libseat.so.1, ...) y la
+      # glibc es otra. Usamos `docker run` en vez de `container:` porque la
+      # imagen de Void no trae node y actions/checkout no podria correr.
+      - name: Build inside Void container
+        run: |
+          # La imagen de Void no trae bash en $PATH, asi que el intérprete es
+          # /bin/sh con ruta absoluta. Por eso no hay `-o pipefail`: no es POSIX.
+          docker run --rm -v "$PWD":/work -w /work \
+            -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+            ghcr.io/void-linux/void-glibc-full:latest \
+            /bin/sh -eux -c '
+              # xbps se actualiza a si mismo primero o se queja al resto.
+              xbps-install -Syu xbps
+              xbps-install -yu
+              # bash va explicito: algun build.rs puede asumirlo presente.
+              xbps-install -y bash \
+                pkg-config rust cargo \
+                clang19-devel libclang19 wayland-devel libxkbcommon-devel \
+                libinput-devel libseat-devel libudev-devel libgbm-devel \
+                libdrm-devel libglvnd-devel pixman-devel dbus-devel \
+                pipewire-devel
+
+              # El workspace vive en la raíz del repo (upstream 0.8.0 layout).
+              cargo build --release --workspace --locked
+
+              # El contenedor corre como root: sin esto los artefactos quedan
+              # de root en el runner y el paso siguiente necesitaria sudo.
+              chown -R "$HOST_UID:$HOST_GID" target
+            '
+
+      - name: Package binaries
+        run: |
+          # Los nombres de rama pueden contener '/': se sanea para que el
+          # nombre del tarball (y del template) sea un nombre de fichero
+          # valido. Tags y 'dev' no cambian.
+          TAG="${GITHUB_REF_NAME//\//-}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          TARBALL="halley-binaries-${TAG}-x86_64.tar.gz"
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+
+          # El top-level del tar es halley-binaries/: el template lo espera
+          # como wrksrc, asi que no hace falta do_extract propio.
+          mkdir -p halley-binaries/bin
+          mkdir -p halley-binaries/share/wayland-sessions
+          mkdir -p halley-binaries/share/xdg-desktop-portal/portals
+          mkdir -p halley-binaries/share/dbus-1/services
+
+          # Binarios (ya vienen con el uid del runner: el contenedor hizo
+          # chown al terminar de compilar).
+          cp target/release/halley halley-binaries/bin/
+          cp target/release/halleyctl halley-binaries/bin/
+          cp target/release/halley-lift halley-binaries/bin/
+          cp target/release/xdg-desktop-portal-halley halley-binaries/bin/
+          cp void/halley-session halley-binaries/bin/
+          chmod 755 halley-binaries/bin/*
+
+          # Archivos de sistema
+          cp packaging/wayland-sessions/halley.desktop halley-binaries/share/wayland-sessions/
+          cp packaging/xdg-desktop-portal/portals/halley.portal halley-binaries/share/xdg-desktop-portal/portals/
+          cp void/halley-portals.conf halley-binaries/share/xdg-desktop-portal/
+          cp packaging/dbus-1/services/org.freedesktop.impl.portal.desktop.halley.service \
+            halley-binaries/share/dbus-1/services/
+
+          tar czf "$TARBALL" halley-binaries/
+          sha256sum "$TARBALL" > "$TARBALL.sha256"
+          cat "$TARBALL.sha256"
+
+      # Genera el template xbps ya con el tag y el checksum rellenos, para
+      # que instalar no requiera copiar hashes a mano.
+      - name: Generate xbps template
+        run: |
+          CHECKSUM=$(sha256sum "$TARBALL" | cut -d' ' -f1)
+          # version= se deriva del tag (v0.5.4 -> 0.5.4): sin esto el paquete
+          # se construiria siempre con la version hardcodeada del template.
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -e "s|@TAG@|${TAG}|g" -e "s|@CHECKSUM@|${CHECKSUM}|g" \
+            -e "s|@VERSION@|${VERSION}|g" \
+            void/template-prebuilt > template
+          echo "--- template generado ---"
+          cat template
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: halley-binaries-x86_64
+          path: |
+            ${{ env.TARBALL }}
+            ${{ env.TARBALL }}.sha256
+            template
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.TARBALL }}
+            ${{ env.TARBALL }}.sha256
+            template
+          body: |
+            Binarios precompilados de Halley `${{ github.ref_name }}`,
+            construidos dentro de un contenedor Void glibc (x86_64).
+
+            ## Instalar en Void Linux
+
+            ```sh
+            git clone --depth=1 https://github.com/void-linux/void-packages.git
+            cd void-packages
+            ./xbps-src binary-bootstrap
+
+            mkdir -p srcpkgs/halley
+            curl -L -o srcpkgs/halley/template \
+              https://github.com/mikuri12/halley/releases/download/${{ github.ref_name }}/template
+
+            ./xbps-src pkg halley
+            doas xbps-install --repository hostdir/binpkgs halley
+            ```
+
+            El `template` de este release ya trae el checksum correcto: no hay
+            que editarlo. No compila Rust, solo descarga y empaqueta.
+
+  # Promociona dev -> main cuando el build ha pasado.
+  #
+  # OJO: la puerta es "compila", no "funciona". Un commit que compile pero
+  # rompa el compositor en runtime llegara a main igualmente. Si eso importa,
+  # quita este job y usa un PR con revision manual.
+  promote:
+    needs: build
+    # Solo en pushes a dev: en tags no tiene sentido (ya son la referencia
+    # publicada) y en workflow_dispatch podria promocionar algo no intencionado.
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # Historia completa: sin esto el merge no encuentra la base comun.
+          fetch-depth: 0
+
+      - name: Fast-forward main to dev
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout main
+          # --ff-only a proposito: si main ha divergido de dev, preferimos que
+          # el job falle y avise antes que crear un merge commit a ciegas.
+          git merge --ff-only "$GITHUB_SHA"
+          git push origin main

@@ -315,6 +315,51 @@ Use `halley-session` or `halley --session` for a native desktop session. See
 [the packaging guide](docs/packaging.md) for display-manager assets, portal
 metadata, systemd, dinit, runit, s6, OpenRC, and distribution paths.
 
+### This fork: Void Linux (xbps) and NixOS/Home Manager (flake)
+
+This fork is synced with upstream and adds distro packaging on top:
+
+**Void Linux (xbps package)** — this repo ships an `xbps-src` template that
+builds the compositor as a real Void package:
+
+```sh
+git clone https://github.com/void-linux/void-packages.git
+cd void-packages
+
+# Drop only the template into srcpkgs/halley. The template itself
+# downloads the source via distfiles (the GitHub tarball of this fork).
+mkdir -p srcpkgs/halley
+curl -L -o srcpkgs/halley/template https://raw.githubusercontent.com/mikuri12/halley/main/void/template
+
+./xbps-src pkg halley
+sudo xbps-install --repository hostdir/binpkgs halley
+```
+
+After install, log out and pick **Halley** from the Noctalia/ly/SDDM menu.
+The installed `halley-session` already carries the `dbus-run-session` guard
+for Void runit (no session D-Bus by default — without that guard the monitor
+hangs with "no signal" when logging in). Prebuilt binaries built inside a
+Void glibc container are attached to each GitHub release, along with a
+checksum-filled xbps template that skips compilation entirely (see
+`void/README-PREBUILT.md`).
+
+**NixOS / Home Manager (flake)** — a flake lives under [`nix/`](./nix):
+
+- `packages.${system}.halley` — the Rust derivation (usable from any other
+  flake as an input).
+- `homeConfigurations.mikuri` — a ready-to-use Home Manager configuration
+  that installs the package and exposes the Wayland session + portal
+  metadata.
+
+```nix
+inputs.halley.url = "github:mikuri12/halley";
+# ...
+home.packages = [ inputs.halley.packages.${system}.halley ];
+```
+
+The Nix `halley-session` wrapper also embeds the `dbus-run-session` guard,
+so it works on runit distros the same way the xbps one does.
+
 ---
 
 ## Default Keybinds

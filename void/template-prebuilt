@@ -1,0 +1,72 @@
+# halley — Spatial Wayland compositor (Mikuri fork, binarios precompilados)
+#
+# PLANTILLA: el workflow de GitHub Actions sustituye @TAG@ y @CHECKSUM@ y
+# publica el resultado como asset "template" del release. Descarga ESE, no
+# este archivo, o el checksum no cuadrara:
+#
+#   curl -L -o srcpkgs/halley/template \
+#     https://github.com/mikuri12/halley/releases/download/<tag>/template
+#
+# Los binarios se compilan dentro de un contenedor Void glibc, asi que
+# linkean contra las mismas sonames que el sistema destino.
+#
+# Ventajas vs compilar en local (ver ./template):
+#   - No instala rust/cargo/clang18 ni las ~14 libs -devel
+#   - Instalacion en segundos en vez de decenas de minutos
+#   - Sin ~2GB de target/ + registry de cargo
+#
+# Build & install:
+#   ./xbps-src pkg halley
+#   doas xbps-install --repository hostdir/binpkgs halley
+
+pkgname=halley
+version=@VERSION@
+revision=1
+# Sin el sufijo `*`: los binarios son glibc, no valen para musl.
+archs="x86_64"
+# Solo deps que xbps no puede deducir del ELF. Las libs compartidas
+# (wayland, libinput, libseat, pixman, ...) las detecta xbps-src solo al
+# escanear los binarios y las anade como shlib-requires; declararlas a mano
+# solo sirve para equivocarse de nombre.
+depends="xwayland-satellite dbus seatd"
+short_desc="Spatial Wayland compositor (Mikuri fork, binarios precompilados)"
+maintainer="mikuri12 <https://github.com/mikuri12>"
+license="GPL-3.0-only"
+homepage="https://github.com/mikuri12/halley"
+
+distfiles="https://github.com/mikuri12/halley/releases/download/@TAG@/halley-binaries-@TAG@-x86_64.tar.gz"
+checksum="@CHECKSUM@"
+
+# El tar se extrae en halley-binaries/, no en ${pkgname}-${version}.
+wrksrc="halley-binaries"
+
+# Binarios ya construidos: no hay nada que compilar.
+do_build() {
+	:
+}
+
+do_install() {
+	vbin bin/halley
+	vbin bin/halleyctl
+	vbin bin/halley-lift
+	vbin bin/xdg-desktop-portal-halley
+	# Wrapper con el guard de dbus-run-session para runit.
+	vbin bin/halley-session
+
+	# .desktop para que el greeter (ly/SDDM/Noctalia) ofrezca "Halley".
+	vmkdir usr/share/wayland-sessions
+	vinstall share/wayland-sessions/halley.desktop 644 \
+		usr/share/wayland-sessions
+
+	# Metadata del backend de xdg-desktop-portal + routing.
+	vmkdir usr/share/xdg-desktop-portal/portals
+	vinstall share/xdg-desktop-portal/portals/halley.portal 644 \
+		usr/share/xdg-desktop-portal/portals
+	vinstall share/xdg-desktop-portal/halley-portals.conf 644 \
+		usr/share/xdg-desktop-portal
+
+	# Servicio D-Bus para que xdg-desktop-portal autoarranque el backend.
+	vmkdir usr/share/dbus-1/services
+	vinstall share/dbus-1/services/org.freedesktop.impl.portal.desktop.halley.service \
+		644 usr/share/dbus-1/services
+}
