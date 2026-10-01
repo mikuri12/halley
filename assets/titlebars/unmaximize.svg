@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Original Halley artwork created by Dustin in Inkscape. -->
+
+<svg
+   width="115.14666mm"
+   height="115.14682mm"
+   viewBox="0 0 115.14666 115.14682"
+   version="1.1"
+   id="svg1"
+   sodipodi:docname="unmaximize.svg"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1">
+    <inkscape:path-effect
+       effect="fillet_chamfer"
+       id="path-effect7"
+       is_visible="true"
+       lpeversion="1"
+       nodesatellites_param="F,0,0,1,0,0,0,1 @ F,0,0,1,0,9.3302439,0,1 @ F,0,0,1,0,13.248672,0,1 @ F,0,0,1,0,10.203018,0,1 @ F,0,0,1,0,0,0,1"
+       radius="0"
+       unit="px"
+       method="auto"
+       mode="F"
+       chamfer_steps="1"
+       flexible="false"
+       use_knot_distance="true"
+       apply_no_radius="true"
+       apply_with_radius="true"
+       only_selected="false"
+       hide_knots="false" />
+  </defs>
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     inkscape:zoom="0.53481161"
+     inkscape:cx="239.33661"
+     inkscape:cy="528.22339"
+     inkscape:window-width="1078"
+     inkscape:window-height="1190"
+     inkscape:window-x="20"
+     inkscape:window-y="20"
+     inkscape:window-maximized="0"
+     inkscape:current-layer="svg1" />
+  <rect
+     fill="none"
+     stroke="#000000"
+     stroke-width="9.41386"
+     stroke-linecap="round"
+     width="76.274986"
+     height="76.45031"
+     x="7.6713924"
+     y="31.173174"
+     ry="11.028893"
+     id="rect2"
+     style="stroke-width:15;stroke-dasharray:none" />
+  <path
+     style="fill:none;stroke:#000000;stroke-width:14.0324;stroke-linecap:round;stroke-linejoin:round"
+     d="m 32.040552,31.125753 0.247361,-14.438344 c 0.08827,-5.152196 4.177293,-9.3302438 9.330244,-9.3302438 l 53.091806,0 c 7.317047,0 13.248677,5.9316318 13.248677,13.2486718 v 53.487977 c 0,5.634971 -4.56805,10.203018 -10.203025,10.203018 l -12.59771,0"
+     id="path7"
+     sodipodi:nodetypes="cssssssc" />
+</svg>

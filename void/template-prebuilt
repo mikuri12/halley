@@ -48,6 +48,7 @@ do_build() {
 do_install() {
 	vbin bin/halley
 	vbin bin/halleyctl
+	vbin bin/halley-lift
 	vbin bin/xdg-desktop-portal-halley
 	# Wrapper con el guard de dbus-run-session para runit.
 	vbin bin/halley-session

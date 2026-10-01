@@ -1,0 +1,74 @@
+# Environment, cursor, keyboard, pointer, and gesture settings.
+
+env:
+  QT_QPA_PLATFORM "wayland"
+  QT_QPA_PLATFORMTHEME "qt6ct"
+end
+
+cursor:
+  theme "Adwaita"
+  size 24
+  hide-when-typing true
+  hide-on-keyboard-nav true
+  hide-on-touch true
+  hide-after-ms 2000
+end
+
+input:
+  repeat-rate 30
+  repeat-delay 500
+  focus-mode "click"
+  raise-on-click true
+
+  keyboard:
+    layout "us"
+    variant ""
+    options ""
+    model ""
+  end
+
+  gestures:
+    enabled true
+    client-passthrough true
+    touch-passthrough true
+    pinch-to-zoom true
+    pinch-scope "empty-field"
+    compositor-scope "empty-field"
+    modifier "mod"
+    scroll-pan "empty-field"
+    pan-fingers 3
+    pan-momentum true
+    pan-decay-rate 6.0
+    flick-min-px-per-s 200.0
+
+    # Discrete swipes and holds may invoke any compositor keybind action.
+    swipe-threshold-px 120.0
+    swipe-up-4 "apogee-open"
+    apogee-swipe-down-4 "apogee-close"
+    # swipe-left-4 "trail-prev"
+    # swipe-right-4 "trail-next"
+    # hold-3 "toggle-state"
+  end
+
+  # Omitted device fields preserve each device's libinput defaults.
+  touchpad:
+    tap true
+    natural-scroll true
+    dwt true
+    accel-profile "adaptive"
+    scroll-method "two-finger"
+    click-method "clickfinger"
+  end
+
+  mouse:
+    natural-scroll false
+    accel-profile "flat"
+  end
+
+  devices:
+    "Logitech MX Master 3":
+      accel-speed 0.6
+      natural-scroll true
+    end
+  end
+end

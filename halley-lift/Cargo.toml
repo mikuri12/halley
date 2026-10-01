@@ -1,0 +1,29 @@
+[package]
+name = "halley-lift"
+version = "0.2.1"
+edition = "2024"
+description = "Search and action launcher for the Halley Wayland compositor"
+authors.workspace = true
+license.workspace = true
+readme = "README.md"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+calloop = "0.14.4"
+calloop-wayland-source = "0.4.1"
+fontdb = "0.23.0"
+freedesktop-icons = "0.4.0"
+halley-api = { version = "0.3.0", path = "../halley-api" }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+resvg = { version = "0.47", default-features = false }
+rune-cfg = "0.7.0"
+rusttype = "0.9.3"
+smithay-client-toolkit = "0.20.0"
+wayland-client = "0.31.14"
+
+[[bin]]
+name = "halley-lift"
+path = "src/main.rs"

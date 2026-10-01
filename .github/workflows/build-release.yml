@@ -41,13 +41,13 @@ jobs:
               # bash va explicito: algun build.rs puede asumirlo presente.
               xbps-install -y bash \
                 pkg-config rust cargo \
-                clang18-devel libclang18 wayland-devel libxkbcommon-devel \
+                clang19-devel libclang19 wayland-devel libxkbcommon-devel \
                 libinput-devel libseat-devel libudev-devel libgbm-devel \
                 libdrm-devel libglvnd-devel pixman-devel dbus-devel \
-                pipewire-devel
+                pipewire-devel libdisplay-info-devel
 
-              cd src
-              cargo build --release --locked
+              # El workspace vive en la raíz del repo (upstream 0.8.0 layout).
+              cargo build --release --workspace --locked
 
               # El contenedor corre como root: sin esto los artefactos quedan
               # de root en el runner y el paso siguiente necesitaria sudo.
@@ -73,17 +73,18 @@ jobs:
 
           # Binarios (ya vienen con el uid del runner: el contenedor hizo
           # chown al terminar de compilar).
-          cp src/target/release/halley halley-binaries/bin/
-          cp src/target/release/halleyctl halley-binaries/bin/
-          cp src/target/release/xdg-desktop-portal-halley halley-binaries/bin/
+          cp target/release/halley halley-binaries/bin/
+          cp target/release/halleyctl halley-binaries/bin/
+          cp target/release/halley-lift halley-binaries/bin/
+          cp target/release/xdg-desktop-portal-halley halley-binaries/bin/
           cp void/halley-session halley-binaries/bin/
           chmod 755 halley-binaries/bin/*
 
           # Archivos de sistema
-          cp void/halley.desktop halley-binaries/share/wayland-sessions/
-          cp void/halley.portal halley-binaries/share/xdg-desktop-portal/portals/
+          cp packaging/wayland-sessions/halley.desktop halley-binaries/share/wayland-sessions/
+          cp packaging/xdg-desktop-portal/portals/halley.portal halley-binaries/share/xdg-desktop-portal/portals/
           cp void/halley-portals.conf halley-binaries/share/xdg-desktop-portal/
-          cp src/packaging/dbus-1/services/org.freedesktop.impl.portal.desktop.halley.service \
+          cp packaging/dbus-1/services/org.freedesktop.impl.portal.desktop.halley.service \
             halley-binaries/share/dbus-1/services/
 
           tar czf "$TARBALL" halley-binaries/

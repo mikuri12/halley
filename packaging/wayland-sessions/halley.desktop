@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Halley
+Comment=Spatial Wayland compositor
+Exec=halley-session
+TryExec=halley-session
+Type=Application
+DesktopNames=Halley
+Keywords=wayland;compositor;windowmanager;

@@ -1,0 +1,15 @@
+[package]
+name = "halley-config"
+version = "0.7.0"
+edition = "2024"
+description = "Configuration loading and parsing for the Halley Wayland compositor"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+regex = "1"
+rune-cfg = "0.7.0"

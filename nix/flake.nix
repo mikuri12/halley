@@ -1,5 +1,5 @@
 {
-  description = "Halley-Mikuri: patched Halley Wayland compositor (v0.5.0 + local fixes)";
+  description = "Halley-Mikuri: Halley Wayland compositor fork synced with upstream 0.8.0";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

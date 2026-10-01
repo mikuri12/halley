@@ -1,0 +1,193 @@
+# Visual styling can live in its own gathered file.
+
+font:
+  family "monospace"
+  size 11
+end
+
+screenshot:
+  directory "$env.HOME/Pictures/Screenshots/"
+end
+
+wallpaper:
+  mode "field-shader"
+  shader "space"
+  colour "#181a26"
+  accent-colour "#8fa8d8"
+  intensity 1.0
+  animated true
+end
+
+decorations:
+  border:
+    size 3
+    radius 8
+    colour-focused "#f4f5f7"
+    colour-unfocused "#3c3836"
+  end
+
+  resize-using-border true
+
+  titlebars:
+    enabled true
+    button-position "right"
+    title-position "center"
+    show-buttons true
+    show-icons false
+    show-title true
+    # Optional title-only font size; omit to inherit global font.size.
+    # text-size 11
+    radius 8
+    height 32
+    colour-focused "#d65d26"
+    colour-unfocused "#3c3836"
+    foreground-colour-focused "#1d2021"
+    foreground-colour-unfocused "#f4f5f7"
+    button-hover-colour "#ffffff"
+    button-pressed-colour "#1d2021"
+  end
+end
+
+effects:
+  blur:
+    overlays true
+    method "dual-kawase"
+    radius 24
+    passes 3
+    saturation 1.10
+    noise 0.012
+  end
+
+  shadows:
+    window:
+      enabled true
+      blur-radius 8
+      spread 0
+      offset-x 0
+      offset-y 5
+      colour "#05030530"
+    end
+
+    node:
+      enabled true
+      blur-radius 14
+      spread 0
+      offset-x 0
+      offset-y 3
+      colour "#05030524"
+    end
+
+    overlay:
+      enabled true
+      blur-radius 24
+      spread 1
+      offset-x 0
+      offset-y 7
+      colour "#05030538"
+    end
+  end
+end
+
+node:
+  show-labels "hover"
+  show-app-icons "always"
+  shape "squircle"
+  label-shape "squircle"
+  icon-size 0.72
+  opacity 1.0
+  background-colour "auto"
+  border-colour "#474d59"
+  border-colour-highlighted "#d65d26"
+  click-collapsed-pan "never"
+end
+
+overlays:
+  background-colour "auto"
+  text-colour "auto"
+  error-colour "#fb4934"
+  border-colour "#d65d26"
+  radius 8
+  borders true
+  border-size 3
+
+  notifications:
+    position "top-center"
+    success-duration-ms 4000
+    error-duration-ms 9000
+  end
+
+  zoom-indicator:
+    enabled true
+    position "bottom-center"
+    hold-duration-ms 750
+    fade-duration-ms 180
+    background true
+    opacity 1.0
+
+    # Optional per-indicator visual overrides. Leave these commented to
+    # inherit the shared font, palette, border, and radius above.
+    # text-size 18
+    # text-colour "auto"
+    # background-colour "auto"
+    # border-colour "#d65d26"
+    # borders true
+    # radius 8
+  end
+end
+
+animations:
+  enabled true
+
+  smooth-resize:
+    enabled true
+    duration-ms 90
+  end
+
+  window-open:
+    enabled true
+    type "center-out"
+    duration-ms 300
+    curve "linear"
+  end
+
+  window-close:
+    enabled true
+    type "shrink"
+    duration-ms 270
+  end
+
+  fullscreen:
+    enabled true
+    motion "spring"
+    damping-ratio 1.0
+    stiffness 800.0
+  end
+
+  maximize:
+    enabled true
+    motion "easing"
+    duration-ms 240
+    curve "ease-in-out-cubic"
+  end
+
+  node:
+    enabled true
+    duration-ms 280 # Node marker appearance.
+    collapse-duration-ms 280 # Window snapshot shrinking/traveling into the node.
+  end
+
+  cluster:
+    enabled true
+    tiling:
+      open-duration-ms 300
+      close-duration-ms 420
+      reflow-duration-ms 240
+      stagger-ms 55
+    end
+    stacking:
+      open-duration-ms 240
+      close-duration-ms 360
+      cycle-duration-ms 220
+    end
+  end
+end

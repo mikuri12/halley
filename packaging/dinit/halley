@@ -1,0 +1,7 @@
+type               = process
+command            = /usr/bin/halley --session
+restart            = false
+working-dir        = $HOME
+ready-notification = pipevar:NOTIFY_FD
+logfile            = $HOME/.local/state/halley/halley.log
+depends-on:        dbus

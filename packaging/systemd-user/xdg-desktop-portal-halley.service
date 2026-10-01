@@ -1,0 +1,10 @@
+[Unit]
+Description=Halley desktop portal backend
+PartOf=graphical-session.target
+After=pipewire.service
+
+[Service]
+Type=dbus
+BusName=org.freedesktop.impl.portal.desktop.halley
+ExecStart=/usr/bin/xdg-desktop-portal-halley
+Restart=on-failure

@@ -1,0 +1,153 @@
+#!/bin/sh
+
+# Display managers do not consistently start sessions through the user's login
+# shell. Re-enter it once so PATH, agents, and user environment match a normal
+# login before exporting Halley's desktop identity.
+if [ "${HALLEY_SESSION_LOGIN_READY:-}" != 1 ] \
+    && [ -n "${SHELL:-}" ] \
+    && grep -Fxq "$SHELL" /etc/shells 2>/dev/null \
+    && ! printf '%s\n' "$SHELL" | grep -Eq '(false|nologin)$'; then
+    export HALLEY_SESSION_LOGIN_READY=1
+    quoted_script=$(printf '%s' "$0" | sed "s/'/'\\\\''/g")
+    session_command="exec '$quoted_script'"
+    for argument do
+        quoted=$(printf '%s' "$argument" | sed "s/'/'\\\\''/g")
+        session_command="$session_command '$quoted'"
+    done
+    exec "$SHELL" -l -c "$session_command"
+fi
+unset HALLEY_SESSION_LOGIN_READY
+
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=Halley
+export XDG_SESSION_DESKTOP=Halley
+export DESKTOP_SESSION=Halley
+
+HALLEY_BIN=${HALLEY_BIN:-/usr/bin/halley}
+export HALLEY_BIN
+
+init_integration_enabled() {
+    case "${HALLEY_NO_INIT_INTEGRATION:-}" in
+        1 | true | yes | on) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+is_systemd_managed() {
+    [ -d /run/systemd/system ]
+}
+
+manager_service_uses_selected_binary() {
+    [ "$HALLEY_BIN" = /usr/bin/halley ]
+}
+
+sync_dbus_environment() {
+    if command -v dbus-update-activation-environment >/dev/null 2>&1; then
+        dbus-update-activation-environment --all >/dev/null 2>&1 || true
+    fi
+}
+
+unset_systemd_environment() {
+    systemctl --user unset-environment \
+        WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP \
+        XDG_SESSION_DESKTOP DESKTOP_SESSION HALLEY_BIN >/dev/null 2>&1 || true
+}
+
+if init_integration_enabled \
+    && manager_service_uses_selected_binary \
+    && is_systemd_managed \
+    && command -v systemctl >/dev/null 2>&1 \
+    && systemctl --user list-unit-files halley.service >/dev/null 2>&1; then
+    if systemctl --user --quiet is-active halley.service; then
+        echo 'A Halley session is already running.' >&2
+        exit 1
+    fi
+
+    systemd_cleanup_done=
+    cleanup_systemd() {
+        [ -z "$systemd_cleanup_done" ] || return
+        systemd_cleanup_done=1
+        systemctl --user start --job-mode=replace-irreversibly \
+            halley-shutdown.target >/dev/null 2>&1 \
+            || systemctl --user stop halley.service >/dev/null 2>&1 \
+            || true
+        unset_systemd_environment
+    }
+    trap cleanup_systemd 0 INT TERM HUP
+
+    systemctl --user reset-failed >/dev/null 2>&1 || true
+    systemctl --user import-environment >/dev/null 2>&1 || true
+    sync_dbus_environment
+
+    systemctl --user --wait start halley.service
+    status=$?
+    cleanup_systemd
+    exit "$status"
+fi
+
+dinit_resources_exist() {
+    for directory in \
+        "${XDG_CONFIG_HOME:-$HOME/.config}/dinit.d" \
+        "$HOME/.dinit.d" \
+        /etc/dinit.d/user \
+        /usr/lib/dinit.d/user \
+        /usr/local/lib/dinit.d/user; do
+        if [ -f "$directory/halley" ] && [ -f "$directory/halley.target" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+if init_integration_enabled \
+    && manager_service_uses_selected_binary \
+    && command -v dinitctl >/dev/null 2>&1 \
+    && command -v dinit-monitor >/dev/null 2>&1 \
+    && command -v pgrep >/dev/null 2>&1 \
+    && pgrep -u "$(id -u)" -x dinit >/dev/null 2>&1 \
+    && dinit_resources_exist; then
+    if dinitctl --quiet --user is-started halley 2>/dev/null; then
+        echo 'A Halley session is already running.' >&2
+        exit 1
+    fi
+
+    dinit_cleanup_done=
+    cleanup_dinit() {
+        [ -z "$dinit_cleanup_done" ] || return
+        dinit_cleanup_done=1
+        dinitctl --quiet --user stop halley.target >/dev/null 2>&1 || true
+        dinitctl --quiet --user unsetenv \
+            WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP \
+            XDG_SESSION_DESKTOP DESKTOP_SESSION HALLEY_BIN >/dev/null 2>&1 || true
+    }
+    trap cleanup_dinit 0 INT TERM HUP
+
+    # Import the login environment into the user manager. Environment variable
+    # names containing newlines are intentionally unsupported.
+    awk 'BEGIN { for (name in ENVIRON) if (name != "AWKPATH" && name != "AWKLIBPATH") print name }' \
+        2>/dev/null | xargs dinitctl --quiet --user setenv 2>/dev/null || true
+    sync_dbus_environment
+    mkdir -p "$HOME/.local/state/halley"
+
+    if ! dinitctl --quiet --user start halley.target; then
+        echo 'Failed to start halley.target with the dinit user manager.' >&2
+        exit 1
+    fi
+
+    # Keep the display-manager session alive until the compositor stops. The
+    # callback terminates dinit-monitor only for stopped/failed transitions.
+    dinit-monitor --user --initial \
+        -c 'sh -c '\''case "$1" in stopped|failed) kill "$PPID" ;; esac'\'' sh "%s"' \
+        halley >/dev/null 2>&1
+    if dinitctl --quiet --user is-failed halley 2>/dev/null; then
+        status=1
+    else
+        status=0
+    fi
+    cleanup_dinit
+    exit "$status"
+fi
+
+# OpenRC, runit, s6, and sessions without a user manager use the compositor as
+# the session process. Halley still publishes its Wayland environment to D-Bus.
+exec "$HALLEY_BIN" --session "$@"

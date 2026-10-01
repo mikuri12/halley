@@ -1,0 +1,109 @@
+@author "Dustin Pilgrim"
+@description "Halley split-config example"
+
+# Gathered files are merged before Halley validates and applies the config.
+# Paths are relative to the file containing each gather statement.
+gather "theme.rune"
+gather "field.rune"
+gather "input.rune"
+
+# Inline/raw sections are easiest to audit when kept in the root file.
+autostart:
+  # once "waybar"
+  # once "mako"
+  # on-reload "notify-send 'Halley configuration reloaded'"
+
+  # Startup clusters are optional, and a fresh config declares none: windows you
+  # open begin on the empty Field. Add a `cluster` block here when you want an
+  # output to start with a named core. See docs/clusters.md for the complete
+  # syntax and launch attribution; the exhaustive template in
+  # examples/halley.rune shows a commented declaration you can copy.
+end
+
+keybinds:
+  "$var.mod+alt+shift+left" "window-transfer left"
+  "$var.mod+alt+shift+right" "window-transfer right"
+  "$var.mod+alt+shift+up" "window-transfer up"
+  "$var.mod+alt+shift+down" "window-transfer down"
+  # Exact-side values such as "left-super" and "right-alt" are also valid.
+  mod "super"
+
+  "$var.mod+shift+e" "quit"
+  "$var.mod+q" "close-focused"
+  "$var.mod+f" "toggle-fullscreen"
+  "$var.mod+m" "maximize-focused"
+  "$var.mod+n" "toggle-state"
+  "$var.mod+p" "toggle-focused-pin"
+  "$var.mod+o" "apogee"
+  "$var.mod+space" "center-last-focused"
+
+  # Contextual navigation follows the active context: the Field arrows move
+  # among Field windows and nodes, a tiling cluster uses the nearest tile, and
+  # a stacking cluster cycles cards.
+  "$var.mod+left" "focus-left"
+  "$var.mod+right" "focus-right"
+  "$var.mod+up" "focus-up"
+  "$var.mod+down" "focus-down"
+
+  "$var.mod+comma" "trail-prev"
+  "$var.mod+period" "trail-next"
+
+  "$var.mod+shift+left" "monitor-focus left"
+  "$var.mod+shift+right" "monitor-focus right"
+  "$var.mod+shift+up" "monitor-focus up"
+  "$var.mod+shift+down" "monitor-focus down"
+  # Exact connector names are accepted too: "monitor-focus DP-1".
+
+  # The same chord can have different actions in non-overlapping contexts.
+  "$var.mod+ctrl+left" "cluster-tile-swap-left" with scope "tile"
+  "$var.mod+ctrl+right" "cluster-tile-swap-right" with scope "tile"
+  "$var.mod+ctrl+up" "cluster-tile-swap-up" with scope "tile"
+  "$var.mod+ctrl+down" "cluster-tile-swap-down" with scope "tile"
+  "$var.mod+ctrl+left" "resize-window-left" with scope "field"
+  "$var.mod+ctrl+right" "resize-window-right" with scope "field"
+  "$var.mod+ctrl+up" "resize-window-up" with scope "field"
+  "$var.mod+ctrl+down" "resize-window-down" with scope "field"
+
+  "$var.mod+a" "arrange-visible"
+
+  "$var.mod+shift+r" "reload"
+  "$var.mod+t" "default-terminal"
+  "$var.mod+d" "halley-lift"
+  # "$var.mod+d" "fuzzel"
+  "Print" "screenshot"
+
+  # Compositor pointer grabs are ordinary remappable actions. Starting the
+  # move action on empty Field pans it instead of moving a window. Drag-pan
+  # keeps a grabbed window on its output and carries it through that Field
+  # after dwelling against an edge.
+  "$var.mod+click-left" "move-window"
+  "$var.mod+click-right" "resize-window"
+  "$var.mod+shift+click-left" "drag-pan"
+  "click-left" "pan-field"
+
+  "alt+tab" "cycle-focus"
+  "alt+shift+tab" "cycle-focus-backward"
+end
+
+rules:
+  window-rule:
+    app-id "firefox"
+    title [r"File Upload.*", r"Open File.*", r"Save File.*", r"Choose.*"]
+    # width 720
+    # height 520
+    spawn-placement "center"
+    cluster-participation "float"
+  end
+
+  # Per-window backdrop blur override (requires effects.blur.enabled).
+  window-rule:
+    app-id "Alacritty"
+    opacity 0.86
+    blur true
+  end
+end
+
+debug:
+  overlay-fps false
+  show-focus-ring false
+end

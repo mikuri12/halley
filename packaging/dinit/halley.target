@@ -1,0 +1,6 @@
+type           = internal
+restart        = false
+depends-on:    halley
+waits-for.d:   $XDG_CONFIG_HOME/dinit.d/halley.d/
+waits-for.d:   $HOME/.config/dinit.d/halley.d/
+waits-for.d:   /etc/dinit.d/user/halley.d/

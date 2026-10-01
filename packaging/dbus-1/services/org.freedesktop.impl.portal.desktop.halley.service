@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.freedesktop.impl.portal.desktop.halley
+Exec=/usr/bin/xdg-desktop-portal-halley
+SystemdService=xdg-desktop-portal-halley.service

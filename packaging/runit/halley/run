@@ -1,0 +1,10 @@
+#!/bin/sh
+# Example user service for a personal runsvdir tree. A system-level seat
+# manager such as seatd or elogind must already be running.
+
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=Halley
+export XDG_SESSION_DESKTOP=Halley
+export DESKTOP_SESSION=Halley
+
+exec /usr/bin/halley --session

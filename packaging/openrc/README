@@ -1,0 +1,14 @@
+Halley on OpenRC
+================
+
+Halley is a user-scoped graphical session, so it does not install an OpenRC
+system service. Install and start seatd (or elogind) as a system service, then
+launch /usr/bin/halley-session from a display manager or login shell.
+
+The session wrapper detects that systemd is not booted and executes Halley
+directly. Halley publishes WAYLAND_DISPLAY and its desktop identity to the
+D-Bus activation environment after the compositor socket is ready, so portals
+and other desktop services work without systemctl.
+
+Set HALLEY_NO_INIT_INTEGRATION=1 to force this direct path even when a supported
+user service manager is present.

@@ -24,6 +24,7 @@
   libgbm,
   libdrm,
   libglvnd,
+  libdisplay-info,
   pixman,
   pipewire,
   xwayland-satellite,
@@ -32,13 +33,16 @@
 in
   rustPlatform.buildRustPackage rec {
     pname = "halley";
-    version = "0.5.0";
+    version = "0.8.0";
 
-    src = ../src;
+    # Upstream 0.8.0 layout: the cargo workspace lives at the repo root
+    # (Cargo.toml + Cargo.lock at top level, smithay vendored in vendor/).
+    src = ../.;
+    sourceRoot = "${src.name}";
 
     # Smithay is the only git dep; the rest come from crates.io via Cargo.lock.
     cargoLock = {
-      lockFile = ../src/Cargo.lock;
+      lockFile = ../Cargo.lock;
       outputHashes = {
         "smithay-0.7.0" = smithayHash;
       };
@@ -60,6 +64,7 @@ in
       libgbm # backend_gbm
       libdrm # backend_drm
       libglvnd # backend_egl / renderer_gl
+      libdisplay-info # libdisplay-info-sys (EDID parsing via smithay)
       pixman
       dbus # IPC / portal
       pipewire # libspa-sys / portal screencast
@@ -94,10 +99,10 @@ in
       wrapProgram $out/bin/halley \
         --prefix PATH : ${lib.makeBinPath [xwayland-satellite]}
 
-      # halleyctl and the portal backend also dlopen EGL/GL/wayland. They're
-      # safe to wrap with LD_LIBRARY_PATH (they don't spawn games / children
-      # of your session).
-      for bin in halleyctl xdg-desktop-portal-halley; do
+      # halleyctl, halley-lift and the portal backend also dlopen
+      # EGL/GL/wayland. They're safe to wrap with LD_LIBRARY_PATH (they
+      # don't spawn games / children of your session).
+      for bin in halleyctl halley-lift xdg-desktop-portal-halley; do
         wrapProgram $out/bin/$bin \
           --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [
         libglvnd

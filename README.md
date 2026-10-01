@@ -6,103 +6,217 @@
   <a href="https://saltnpepper97.github.io/halley-site/"><strong>Website</strong></a>
 </p>
 
-[![Sponsor](https://img.shields.io/badge/%E2%9D%A4-Support_Halley-ff69b4?style=for-the-badge)](#support-the-next-leap)
+[![Sponsor](https://img.shields.io/badge/%E2%9D%A4-Support_Halley-ff69b4?style=for-the-badge)](#support-halley)
 ![License](https://img.shields.io/badge/license-GPL--3.0--only-blueviolet?style=for-the-badge)
 ![Status](https://img.shields.io/badge/status-active-brightgreen?style=for-the-badge)
 ![Wayland](https://img.shields.io/badge/display-Wayland-blue?style=for-the-badge)
-![Build](https://img.shields.io/badge/build-passing-success?style=for-the-badge)
 ![Rust](https://img.shields.io/badge/language-Rust-orange?style=for-the-badge)
 
 ---
 
 > **Windows as nodes. Windows as clusters. Windows as your command center.**
 
-Halley is a Wayland compositor built from the ground up for multi-monitor setups. Each display gets its own independent infinite canvas. Windows live as nodes on those canvases, group into clusters you build intentionally, and decay gracefully when they drift out of focus. Inspired by the comet it's named after — periodic, precise, and always returning — Halley makes multi-monitor work feel deliberate rather than chaotic.
+Halley is a spatial Wayland compositor built for multi-monitor desktops. Each
+display has an independent infinite Field: a camera over freely overlapping
+windows, collapsed node landmarks, and clusters assembled around the work you
+actually want to keep together. Windows can decay when they leave your active
+area, return through history-aware navigation, or remain pinned as durable
+landmarks.
+
+Halley 0.6 is a ground-up compositor rewrite. It keeps the Field, nodes,
+clusters, decay, Trail, Bearings, Apogee, Lift, and native capture experience,
+but rebuilds their foundations around Smithay's GLES renderer, damage-aware
+presentation, native embedded XWayland, and a typed public API.
 
 ---
 
-## Support the Next Leap
+## Start here: the normal Field loop
 
-Halley will continue receiving updates, fixes, protocol work, and polish. The project is active, and the core direction is not being paused or held hostage.
+Halley is Field-first. Applications open onto the Field, you position them as
+you work, and you clean up when the visible Field becomes cluttered. The whole
+daily workflow is one loop:
 
-The larger leap is different. A full Wayland desktop ecosystem can only be taken so far as a solo project. Sponsorship helps fund the boring-but-important work that makes Halley more durable, approachable, and useful over time — documentation, testing, packaging, compatibility, triage, tooling, and release work — alongside larger technical improvements.
+> Launch freely → position and overlap naturally → arrange when the visible
+> Field becomes messy → collapse work intentionally → retrieve it spatially →
+> use clusters later only when deliberately configured.
 
-Sponsorship does **not** buy roadmap control. Halley remains maintainer-directed. Support helps create the time and stability needed to execute on that direction responsibly.
+1. **Launch freely.** `Super+D` opens Halley Lift, so whatever you start lands
+   directly on the Field.
+2. **Position and overlap naturally.** `Super+Left-drag` moves a window, and
+   ordinary windows are free to overlap instead of being solved into slots.
+3. **Arrange when the visible Field becomes messy.** `Super+A` gathers the
+   visible windows into a balanced mosaic and remembers the geometry each one
+   came from.
+4. **Collapse work intentionally.** `Super+N` collapses the focused window into
+   its clickable node — the marker that keeps the window's place on the Field —
+   and restores it again.
+5. **Retrieve it spatially.** `Super+Arrow` walks to the nearest window or node;
+   the retrieval layers below cover recent work, offscreen work, and everything
+   open across your monitors.
+6. **Use clusters later, only when deliberately configured.** A cluster is an
+   optional named context, not the way Halley expects you to organize windows.
 
-### Sponsorship Stretch Goals
+`Super+A` and `Super+N` are ordinary reversible actions, not modes. `Super+A` is
+reversible cleanup: it creates no tiling tree, no relationship, and no
+persistent layout mode, every window stays independently movable, and pressing
+it again restores the exact saved geometry. `Super+N` is a manual collapse you
+can see happen, and a collapsed node is restored by clicking it or by pressing
+`Super+N` on it again; automatic decay is a separate, conservative safety net
+for genuinely abandoned work, described in
+[nodes and decay](docs/nodes.md).
 
-- A real Halley website, beyond a basic GitHub Pages presence.
-- A major Rune-CFG upgrade so it can become a larger foundation for future Halley UI and app work, not only a config language.
-- A much stronger `halley-api` for plugins, integrations, ecosystem tooling, and external developers.
-- A system for creating full Halley ecosystem apps using Rune-CFG plus light Rust, mostly through `halley-api`.
-- Documentation, onboarding, examples, migration notes, troubleshooting, and developer guides.
-- Packaging, testing, CI, compatibility, hardware/device testing, crash/debug tooling, and other infrastructure work.
-- Funding or compensating a community maintainer for triage, Discord/community support, docs cleanup, bug reproduction, and release coordination.
-- Better outreach: demos, release posts, videos, dev logs, showcases, and broader Linux desktop visibility.
+Halley does not start you on numbered workspaces. Each monitor owns its own
+Field and applications live on it. Clusters and their numbered slots exist for
+people who deliberately declare or create them, and the 0.8.0 first-run card
+teaches no cluster controls at all.
+
+### Retrieval
+
+Halley keeps five retrieval mechanisms because they answer five different
+questions. They are layers, not replacements for each other.
+
+| Mechanism | Binding | Question it answers |
+|---|---|---|
+| Directional focus | `Super+Arrow` | Nearby spatial navigation — which window or node is next in this direction? |
+| Focus carousel | `Alt+Tab` / `Alt+Shift+Tab` | Recent-work navigation — what did I just come from? |
+| Bearings | `Super+Z` hold / `Super+Shift+Z` toggle | Offscreen spatial retrieval — where did work go beyond this monitor's view? |
+| Apogee | `Super+O` | Visual inventory across monitors — what is open on every display? |
+| Halley Lift | `Super+D` | Direct search by application, node, cluster, or compositor action — what is this called? |
+
+The escalation is deliberate: the arrows move one step, `Alt+Tab` recalls recent
+work, Bearings and Apogee show where things are, and Lift finds something by
+name.
 
 ---
 
-## Demo
+## Support Halley
 
-![Halley demo](demo/demo.png)
-![Halley demo](demo/demo-1.png)
+Halley will continue receiving updates, fixes, protocol work, and polish. The
+project is active, and its core direction is not being paused or held hostage.
+
+Sponsorship helps fund the unglamorous work that makes a compositor durable:
+documentation, testing, packaging, compatibility, triage, hardware debugging,
+tooling, and release work. It creates more time to work carefully instead of
+turning funding thresholds into product promises.
+
+Sponsorship does **not** buy roadmap control. Halley remains
+maintainer-directed.
 
 ---
 
 ## Concepts
 
-A quick orientation before diving in.
-
 | Term | What it is |
 |---|---|
-| **Field** | An infinite 2D canvas, one per monitor. Everything lives here. Zoomable and pannable. |
-| **Node** | A window on the Field — open, collapsed, or a cluster core. |
-| **Focus Ring** | An invisible eye-shaped region defining your active area. Windows outside it are candidates for decay. |
-| **Decay** | Nodes that drift outside the focus ring dim or collapse over time. Optional and configurable. |
-| **Cluster** | Halley's answer to workspaces — a contained layout you build intentionally from a set of windows. |
-| **Core** | The collapsed form of a cluster on the Field. Expands into a petal arrangement of window previews. |
-| **Trail** | History-aware navigation — step backward and forward through recent focus changes. |
-| **Bearings** | A lightweight directional overlay for orienting movement and navigation around the current view. |
-| **Jump** | Move a grabbed window across monitors, traversing between Fields, with a single keybind. |
+| **Field** | An infinite, zoomable 2D canvas with an independent camera on each monitor. |
+| **Node** | A managed window's stable identity and its collapsed representation on the Field. |
+| **Focus Ring** | An elliptical active region used by decay and navigation policy. |
+| **Decay** | Configurable transitions that collapse inactive windows outside the focus ring. |
+| **Landmark** | A collapsed or pinned object that remains spatially meaningful while ordinary windows overlap freely. |
+| **Cluster** | A group of windows that opens into its own tiling or stacking workspace. |
+| **Core** | The collapsed Field representation of a cluster. |
+| **Trail** | Per-monitor focus history with backward, forward, list, and exact goto controls. |
+| **Bearings** | A directional overlay for finding and navigating offscreen nodes and cluster cores. |
+| **Apogee** | A multi-monitor overview with live compositor-owned previews. |
 
 ---
 
 ## The Field
 
-Multi-monitor is a first-class concept in Halley — not an afterthought. Each monitor gets its own infinite canvas, completely independent from every other display. The Field is zoomable, pannable, and isolated per monitor.
+Multi-monitor behavior is not an extension of one shared workspace. Every
+output owns its own camera, focus history, active cluster, fullscreen state,
+maximize state, and focus-ring policy.
 
-- **Per-monitor** — displays don't share state; each Field is its own world
-- **Max windows** — configurable cap on open nodes per Field
-- **Decay** — opt-in clutter management based on focus ring position; a small overlap tolerance prevents edge-case false positives
-- **Jump** — grab a window and send it to another monitor's Field with one keybind; `Super+Shift+LeftMouse` for a pointer-driven field jump
+- **Independent cameras** — pan and zoom one monitor without disturbing the
+  others.
+- **Free overlap** — normal active windows overlap by default instead of being
+  forced through a global no-overlap solver.
+- **Decay and landmarks** — inactive windows can collapse into durable nodes;
+  pinned nodes stay fixed until explicitly moved.
+- **Move or carry** — Mod+drag crosses monitor boundaries, while
+  Mod+Shift+drag dwells at an edge to carry the window through its current
+  output's Field.
+- **Trail navigation** — walk backward and forward through each monitor's
+  recent Field focus history.
+- **Directional focus** — the same action vocabulary adapts to the Field,
+  tiling clusters, and stacking clusters.
 
-The **Focus Ring** is the heart of the Field. It's an invisible eye-shaped region centered on your view — windows that fall significantly outside it over time become candidates for decay. You can make it briefly visible via config; it fades out after a moment. Size and shape are fully configurable.
+The focus ring is an invisible ellipse around the useful part of a monitor's
+camera. Its dimensions and offset are configurable per output. Windows outside
+that ring become candidates for timer-driven decay rather than disappearing
+because an arbitrary global window count was exceeded.
+
+Decay is conservative and optional. A newly generated config waits 10 minutes
+outside the focus ring and 90 minutes inside it before an unfocused window
+becomes a node; existing configs keep their own values, and a config without a
+`decay:` section keeps Halley's shorter built-in delays. The first automatic
+collapse explains itself once — `<Application> was collapsed into a node. Click
+the node or press Mod+N to restore it.` — in a non-modal notice that never takes
+input, and `Mod+N` collapses and restores windows by hand at any time.
+
+A fresh Halley session begins on this empty Field. A newly generated config
+declares no startup clusters, so applications you launch open directly into the
+Field. Clusters are optional named contexts you add deliberately, either by
+declaring startup clusters in `autostart` or by creating them at runtime.
+
+---
+
+## First Run
+
+A newly generated configuration's first native session shows one compositor-owned
+**Halley basics** card: the Field-first mental model, plus only the five
+operations it depends on.
+
+- `Super+D` — launch or search with Lift.
+- `Super+Left-drag` — move a window.
+- `Super+A` — arrange visible windows, or restore their saved geometry.
+- `Super+N` — collapse or restore a window.
+- `Super+O` — see everything in Apogee.
+
+The card names your configured `mod` key, so a nested `halley --winit` session
+shows `Alt+D` where a native session shows `Super+D`. It is a primer rather than
+a tutorial: it lists no zoom, Bearings, Trail, pinning, or cluster layouts, it
+never dims or blocks the desktop, and only its own dismissal keys are captured.
+`Enter`, `Escape`, or a click closes it for good. Clusters stay out of first-run
+training for 0.8.0 — the card names no cluster action, core, or layout — so you
+only meet clusters when you deliberately configure them.
+
+It appears only for a configuration Halley generated itself. Existing
+configurations, nested `halley --winit` sessions, and explicitly selected
+`-c PATH` files never show it automatically. Dismissal is remembered in
+`$XDG_STATE_HOME/halley/state.rune`, falling back to
+`~/.local/state/halley/state.rune`; that file is user state, not configuration,
+is never migrated, and is safe to delete. Reopen the card whenever you like from
+Halley Lift's **Show Halley basics** action or with `halleyctl basics`.
 
 ---
 
 ## Clusters
 
-Clusters are Halley's answer to workspaces — but you build them yourself, intentionally, rather than having them auto-generated.
+Clusters come last in the Field loop, and only when you deliberately configure
+them. A runtime-created cluster is a named context assembled from windows that
+are already on the Field; nothing creates a cluster implicitly, and a session
+without clusters is a complete Halley session. You can instead declare a
+startup cluster explicitly under `autostart`.
 
-### Building a cluster
+Enter cluster mode to open the Cluster Composer on the selected monitor.
+Eligible windows and collapsed nodes animate into a stable, non-overlapping
+mosaic. Use the arrow keys or pointer to focus a card, `Space` or left click to
+toggle membership, `Enter` to name the draft, and `Escape` to step back or
+cancel. Selected cards keep a persistent tint and checkmark distinct from the
+focus frame. Confirming creates a core on the Field; hovering a core can bloom
+member previews around it, and opening it enters a monitor-local workspace
+while leaving the Field geometry intact behind it.
 
-Enter cluster mode, then click or mark the windows you want to group. Press `Enter` to form the cluster, or `Esc` to cancel and return to the Field. Once formed, the cluster collapses into a **core node** on the Field — a single handle representing the whole group.
+Two layouts are available:
 
-### The core
+- **Tiling** — a master-and-stack layout with directional focus, tile swaps,
+  overflow, and per-member floating.
+- **Stacking** — an overlapping deck with focused-card cycling and retained
+  order.
 
-Clicking a core within the focus ring **enters** the cluster. Expanding it fans the windows out in a **petal arrangement** — clockwise or counter-clockwise — as icon-sized previews around the core. From there you can:
-
-- Pull windows out into the Field
-- Bring Field windows in
-- Collapse it back into the core
-
-### Inside a cluster
-
-Once inside, you leave the Field entirely. The cluster is its own contained space with one of two layout modes:
-
-**Tiling** — Weighted tiling. Windows are arranged by assigned weight and recency.
-
-**Stacking** — Windows layered in a navigable stack, similar to a mobile app switcher. Navigate with keybinds, reorder the stack as needed.
+Cluster slots are per monitor. Opening the active slot again returns to the
+unchanged Field.
 
 ---
 
@@ -110,15 +224,35 @@ Once inside, you leave the Field entirely. The cluster is its own contained spac
 
 | System | Description |
 |---|---|
-| **Field** | Per-monitor infinite canvases with zoom and pan |
-| **Clusters** | Core nodes, cluster entry/exit, tiling, stacking, drag reordering |
-| **Focus Ring** | Configurable active region with optional preview |
-| **Decay** | Optional clutter reduction outside the focus ring |
-| **Trail** | Recent-focus navigation — back and forward |
-| **Bearings** | Directional overlays and navigation cues |
-| **Jump / Field Jump** | Fast cross-monitor grabbed-window movement |
-| **IPC** | Unix socket control at `$XDG_RUNTIME_DIR/halley/halley.sock` |
-| **Xwayland** | On-demand support via `xwayland-satellite` |
+| **Field** | Per-monitor infinite canvases with independent pan, zoom, focus, and presentation state |
+| **Nodes** | Stable identities, collapse/restore, pinning, icons, labels, and landmark behavior |
+| **Clusters** | Draft creation, core nodes, tiling, stacking, slots, floating members, and animated transitions |
+| **Decay** | Focus-ring and timer-driven clutter reduction |
+| **Trail** | Per-output recent-focus navigation and remote inspection |
+| **Bearings** | Directional overlays and offscreen navigation |
+| **Apogee** | Multi-monitor overview and live previews |
+| **Lift** | Bundled search and action launcher, bound to `Super+D` in fresh configs |
+| **Capture** | Native menu, region, screen, and window screenshots plus portal screencasting |
+| **IPC/API** | Persistent typed clients, capability discovery, subscriptions, and `halleyctl` |
+| **XWayland** | Native embedded XWayland and compositor-owned X11 window management |
+
+### Rewrite boundaries
+
+The rewrite intentionally does not carry every old policy forward.
+
+- Native embedded XWayland replaces `xwayland-satellite`; game input and
+  pointer-lock bugs belong in the native path instead of a special game-mode
+  exception layer.
+- The old compositor-side game classifier, special game-mode exception layer,
+  and Gamescope launch wrapper are not part of the rewritten compositor.
+  Launchers can invoke Gamescope directly when desired.
+- The supported `halley-api` is for external launchers, panels, automation,
+  tests, and desktop components. Halley currently promises no in-process
+  extension framework.
+- The former adaptive top-edge client is not being ported. Any future shell in
+  that space will be prototyped as a new design.
+- Zoom tops out at native scale. Active windows are governed by focus-ring and
+  timer policy rather than a maximum-window cap.
 
 ---
 
@@ -126,33 +260,74 @@ Once inside, you leave the Field entirely. The cluster is its own contained spac
 
 Halley targets a native Linux Wayland session and expects:
 
-- A DRM/KMS-capable graphics stack with GBM/EGL/OpenGL support
-- A seat/session backend through `libseat` such as `seatd` or logind
-- `libinput` and `udev` access on a real TTY for the native backend
-- Rust and Cargo if you are building from source
+- A DRM/KMS graphics stack with GBM, EGL, and OpenGL ES support
+- A seat/session backend through `libseat`, such as `seatd` or logind
+- `libinput` and `udev` access for the native TTY backend
+- Rust and Cargo when building from source
 
-Optional but commonly needed:
+Optional desktop components:
 
-- `xwayland-satellite` for X11 app support
-- Halley's native `xdg-desktop-portal-halley` backend for portal-driven screen/window sharing, plus `xdg-desktop-portal-gtk` for common file/dialog portals
-- `fuzzel` plus a Wayland terminal such as `ghostty`, `kitty`, `foot`, `wezterm`, `alacritty`, `rio`, or `contour` if you use the default launch bindings
+- The `Xwayland` executable for X11 applications; Halley manages it natively
+- `xdg-desktop-portal` and a settings/file-dialog backend such as
+  `xdg-desktop-portal-gtk`
+
+Halley does not require systemd. The default build supports systemd user
+sessions, while dinit and direct init-agnostic launch paths are also packaged.
 
 ---
 
-## Install
+## Build and Install
 
-### Void Linux (xbps package — this fork)
+Build the complete workspace:
 
-This fork ships an `xbps-src` template that builds the compositor as a real Void
-package. Anyone can build it on Void with no local files to copy.
+```sh
+git clone https://github.com/saltnpepper97/halley
+cd halley
+cargo build --release --workspace
+```
+
+The build produces:
+
+```text
+target/release/halley
+target/release/halleyctl
+target/release/halley-lift
+target/release/xdg-desktop-portal-halley
+```
+
+For user-local testing:
+
+```sh
+install -Dm755 target/release/halley ~/.local/bin/halley
+install -Dm755 target/release/halleyctl ~/.local/bin/halleyctl
+install -Dm755 target/release/halley-lift ~/.local/bin/halley-lift
+install -Dm755 target/release/xdg-desktop-portal-halley \
+  ~/.local/bin/xdg-desktop-portal-halley
+```
+
+Run a nested development compositor with:
+
+```sh
+halley --winit
+```
+
+Use `halley-session` or `halley --session` for a native desktop session. See
+[the packaging guide](docs/packaging.md) for display-manager assets, portal
+metadata, systemd, dinit, runit, s6, OpenRC, and distribution paths.
+
+### This fork: Void Linux (xbps) and NixOS/Home Manager (flake)
+
+This fork is synced with upstream and adds distro packaging on top:
+
+**Void Linux (xbps package)** — this repo ships an `xbps-src` template that
+builds the compositor as a real Void package:
 
 ```sh
 git clone https://github.com/void-linux/void-packages.git
 cd void-packages
 
 # Drop only the template into srcpkgs/halley. The template itself
-# downloads the source via distfiles (the GitHub tarball of this fork), so
-# there's nothing else to copy.
+# downloads the source via distfiles (the GitHub tarball of this fork).
 mkdir -p srcpkgs/halley
 curl -L -o srcpkgs/halley/template https://raw.githubusercontent.com/mikuri12/halley/main/void/template
 
@@ -160,297 +335,212 @@ curl -L -o srcpkgs/halley/template https://raw.githubusercontent.com/mikuri12/ha
 sudo xbps-install --repository hostdir/binpkgs halley
 ```
 
-After install, log out and pick **Halley** from the Noctalia/ly/SDDM menu. The
-`.desktop` points to `/usr/bin/halley-session`, which already carries the
-`dbus-run-session` guard for Void runit (no session D-Bus by default —
-without that guard the monitor hangs with "no signal" when logging in).
+After install, log out and pick **Halley** from the Noctalia/ly/SDDM menu.
+The installed `halley-session` already carries the `dbus-run-session` guard
+for Void runit (no session D-Bus by default — without that guard the monitor
+hangs with "no signal" when logging in). Prebuilt binaries built inside a
+Void glibc container are attached to each GitHub release, along with a
+checksum-filled xbps template that skips compilation entirely (see
+`void/README-PREBUILT.md`).
 
-Build-time dependencies (`clang18-devel`, `wayland-devel`, ..., see `void/template`).
-Runtime dependencies (`xwayland-satellite`, `dbus`, `seatd`) are pulled in
-automatically via `depends=`.
+**NixOS / Home Manager (flake)** — a flake lives under [`nix/`](./nix):
 
-### NixOS / Home Manager (flake)
-
-This fork also exposes a flake under [`nix/`](./nix) with:
-
-- `packages.${system}.halley` — the Rust derivation (callable from any other
+- `packages.${system}.halley` — the Rust derivation (usable from any other
   flake as an input).
-- `packages.${system}.default` — alias of `halley`.
 - `homeConfigurations.mikuri` — a ready-to-use Home Manager configuration
-  that installs the package and exposes the Wayland session + portal metadata.
-
-#### Use it from your existing flake
+  that installs the package and exposes the Wayland session + portal
+  metadata.
 
 ```nix
 inputs.halley.url = "github:mikuri12/halley";
 # ...
-environment.systemPackages = [ inputs.halley.packages.${system}.halley ];
-# or, on Home Manager:
 home.packages = [ inputs.halley.packages.${system}.halley ];
 ```
 
-The `halley` derivation ships `passthru.providedSessions = [ "halley" ]`, so
-on NixOS you can also register it with the display manager:
-
-```nix
-services.displayManager.sessionPackages = [ inputs.halley.packages.${system}.halley ];
-xdg.portal.extraPortals = [ inputs.halley.packages.${system}.halley ];
-```
-
-#### Or apply the ready-made HM configuration
-
-On a non-NixOS distro (Void, Arch, …) with Home Manager standalone:
-
-```sh
-home-manager switch --flake github:mikuri12/halley#mikuri
-```
-
-This installs `halley`, `halleyctl`, `xdg-desktop-portal-halley` into the
-`mikuri` user profile and writes the Wayland `.desktop` + portal metadata
-into `~/.local/share/`. The `halley-session` wrapper shipped with the Nix
-package already contains the `dbus-run-session` guard (same as the Void one).
-
-> Note: `home.username` is hardcoded to `mikuri` in the example config. Fork
-> the repo or override the module with your own username.
-> `home.stateVersion = "25.05"`.
-
-### AUR (upstream only)
-
-    yay -S halley
-
-or
-
-    paru -S halley
-
-Or for the latest commit:
-
-    yay -S halley-dev
-
-or
-
-    paru -S halley-dev
-
-### From Source
-
-    git clone https://github.com/mikuri12/halley
-    cd halley
-    cd src
-    cargo build --release
-
-The compositor, control CLI, and portal backend binaries will be available at:
-
-    src/target/release/halley
-    src/target/release/halleyctl
-    src/target/release/xdg-desktop-portal-halley
-
-For local testing without system-wide binaries, install them into `~/.local/bin`:
-
-    install -Dm755 src/target/release/halley ~/.local/bin/halley
-    install -Dm755 src/target/release/halleyctl ~/.local/bin/halleyctl
-    install -Dm755 src/target/release/xdg-desktop-portal-halley ~/.local/bin/xdg-desktop-portal-halley
-
-### Display Manager Session
-
-Halley's native session needs to start the tty backend rather than the nested `winit` backend. This repo ships the assets needed for display managers such as SDDM and LightDM directly in the `src/` tree:
-
-- `src/packaging/wayland-sessions/halley-session`
-- `src/packaging/wayland-sessions/halley.desktop`
-
-Install them to the standard system locations alongside the compositor binary:
-
-    sudo install -Dm755 src/target/release/halley /usr/bin/halley
-    sudo install -Dm755 src/packaging/wayland-sessions/halley-session /usr/bin/halley-session
-    sudo install -Dm644 src/packaging/wayland-sessions/halley.desktop /usr/share/wayland-sessions/halley.desktop
-    sudo install -Dm644 src/packaging/systemd-user/halley.service /usr/lib/systemd/user/halley.service
-    sudo install -Dm644 src/packaging/systemd-user/halley-shutdown.target /usr/lib/systemd/user/halley-shutdown.target
-
-`halley-session` is the recommended public launcher for a full Halley desktop session. It will start `halley.service` when a user systemd instance is available, which makes `graphical-session.target`, `xdg-desktop-autostart.target`, and related user-session units behave correctly under display managers like SDDM. If those units are not installed, the launcher falls back to executing `halley` directly.
-
-> On Void (runit, no systemd) the launcher needs the `dbus-run-session`
-> guard so Halley gets a session bus — otherwise it hangs in
-> `dbus-update-activation-environment`. Use the `void/halley-session`
-> wrapper shipped in this repo instead of the upstream one.
-
-The compositor also accepts `halley --session` for session wrappers, packagers, and service files. Normal users should prefer `halley-session`.
-
-After that, `Halley` should appear in Wayland-capable display managers.
+The Nix `halley-session` wrapper also embeds the `dbus-run-session` guard,
+so it works on runit distros the same way the xbps one does.
 
 ---
 
 ## Default Keybinds
 
-Defaults follow Halley's shipped fresh-config template.
+The canonical defaults live in
+[`examples/halley.rune`](examples/halley.rune). Keybinds are configurable,
+context-scoped, side-aware, and shared by keyboard, pointer-button, wheel,
+swipe, and hold actions.
 
 | Category | Keybind | Action |
 |---|---|---|
-| Basic | `Super+Shift+r` | Reload config |
-| Basic | `Super+n` | Toggle state |
-| Basic | `Super+q` | Close focused window |
-| Quit | `Super+Shift+e` | Quit Halley |
-| Zoom | `Super+MouseWheelUp` | Zoom in |
-| Zoom | `Super+MouseWheelDown` | Zoom out |
-| Zoom | `Super+MiddleMouse` | Reset zoom |
-| Move | `Super+Left` | Move node left |
-| Move | `Super+Right` | Move node right |
-| Move | `Super+Up` | Move node up |
-| Move | `Super+Down` | Move node down |
-| Monitor | `Super+Shift+Left` | Focus monitor left |
-| Monitor | `Super+Shift+Right` | Focus monitor right |
-| Monitor | `Super+Shift+Up` | Focus monitor up |
-| Monitor | `Super+Shift+Down` | Focus monitor down |
-| Clusters | `Super+Shift+c` | Enter cluster mode |
-| Clusters | `Super+l` | Cycle cluster layout |
-| Bearings | `Super+z` | Show bearings |
-| Bearings | `Super+Shift+z` | Toggle bearings |
-| Trail | `Super+,` | Trail previous |
-| Trail | `Super+.` | Trail next |
-| Launch | `Super+Return` | Open terminal |
-| Launch | `Super+d` | Launch `fuzzel` |
-| Pointer | `Super+LeftMouse` | Move window |
-| Pointer | `Super+RightMouse` | Resize window |
-| Pointer | `Super+Shift+LeftMouse` | Field jump |
-| Screenshot | `Super+Shift+s` | Open capture menu |
-| Tile | `Super+Left/Right/Up/Down` | Focus tile in that direction |
-| Tile | `Super+Ctrl+Left/Right/Up/Down` | Swap tile in that direction |
-| Stacking | `Super+Left` | Cycle stack forward |
-| Stacking | `Super+Right` | Cycle stack backward |
-| Media | `XF86AudioRaiseVolume` | Raise volume |
-| Media | `XF86AudioLowerVolume` | Lower volume |
-| Media | `XF86AudioMute` | Toggle mute |
+| Basic | `Super+Shift+E` | Open Halley's quit confirmation |
+| Basic | `Super+Q` | Close the focused window |
+| Basic | `Super+F` | Toggle fullscreen |
+| Basic | `Super+M` | Toggle Field maximize |
+| Basic | `Super+N` | Collapse the focused window into its node, or restore it (a collapsed node also restores on click) |
+| Basic | `Super+P` | Pin or unpin the focused window |
+| Overview | `Super+O` | Toggle Apogee, the visual inventory across monitors |
+| Focus | `Alt+Tab` / `Alt+Shift+Tab` | Recent-work navigation: cycle the focus carousel forward/backward |
+| Focus | `Super+Arrow` | Nearby spatial navigation: directional focus in the active context |
+| Focus | `Super+H` | Center the last-focused Field window |
+| Trail | `Super+,` / `Super+.` | Previous/next Trail entry |
+| Monitor | `Super+Shift+Arrow` | Focus an adjacent monitor |
+| Move | `Super+Alt+Arrow` | Move the focused Field node |
+| Resize/Tile | `Super+Ctrl+Arrow` | Resize in the Field or swap in a tiling cluster |
+| Arrange | `Super+A` | Reversible cleanup: gather visible Field windows into a mosaic, or press again to restore their saved geometry |
+| Clusters | `Super+Shift+C` | Enter cluster creation mode |
+| Clusters | `Super+L` | Cycle cluster layout |
+| Clusters | `Super+V` | Toggle the focused cluster member floating |
+| Clusters | `Super+0..9` | Open a per-monitor cluster slot |
+| Bearings | `Super+Z` / `Super+Shift+Z` | Offscreen retrieval: hold or toggle Bearings |
+| Launch | `Super+T` | Open the first supported terminal |
+| Launch | `Super+D` | Open Halley Lift to search applications, nodes, clusters, and compositor actions (Fuzzel is a commented alternative) |
+| Reload | `Super+Shift+R` | Reload the selected configuration |
+| Zoom | `Super+-` / `Super+=` / `Super+Shift+0` | Zoom out, in, or reset |
+| Pointer | `Super+Left Mouse` | Move a window |
+| Pointer | `Super+Right Mouse` | Smoothly resize a window |
+| Pointer | `Left Mouse` on empty Field | Pan the Field |
+| Screenshot | `Print` | Open native capture |
+
+A few rows carry the framing from the loop above. `Super+A` is reversible
+cleanup rather than a tiling mode: it writes no layout, no relationship, and no
+persistent mode, and a second press restores each window's saved geometry.
+`Super+N` collapses the focused window into its clickable node and restores it
+again, while automatic decay is a separate conservative timer for genuinely
+abandoned work. `Alt+Tab`, `Super+Arrow`, Bearings, Apogee, and Lift are the
+five retrieval layers described in [Retrieval](#retrieval). The cluster rows act
+only on clusters you declared or created yourself.
+
+The same chord may be assigned distinct actions in `field`, `cluster`, `tile`,
+and `stack` scopes. Left/right Super, Alt, Ctrl, and Shift can be matched
+independently. Compositor move, resize, and pan grabs are ordinary remappable
+bindings rather than hardcoded mouse policy.
+
+`Super+D` opens Halley Lift, the bundled search and action launcher documented
+in [`halley-lift/README.md`](halley-lift/README.md). It searches applications,
+running nodes, clusters, compositor actions, and config files from one field,
+and it can run terminal commands. Prefer a separate launcher? Any non-built-in
+action string is a command line, so replacing one line is enough:
+
+```rune
+"$var.mod+d" "fuzzel"
+```
+
+Existing 0.6-or-newer configurations keep whatever launcher they already bind.
+Only a newly generated config defaults to Halley Lift, and routine structural
+migration does not rewrite a launcher binding. Migrating an incompatible
+pre-0.6 config is the exception: after making a timestamped backup, Halley
+replaces that file with the current default config.
 
 ---
 
 ## Configuration
 
-On first launch Halley bootstraps `~/.config/halley/halley.rune` for you from an internal fully documented template, inserting detected tty monitors into the `viewport` section. Normal config precedence is `--config`/`-c`, then `HALLEY_WL_CONFIG`, then `~/.config/halley/halley.rune`, then `/etc/halley/halley.rune`, then generated user config/internal defaults. Use `halley --config /path/to/halley.rune` or `halley -c /path/to/halley.rune` to force a specific file.
+On first launch Halley creates
+`$XDG_CONFIG_HOME/halley/halley.rune`, falling back to
+`~/.config/halley/halley.rune`, from the canonical
+[`examples/halley.rune`](examples/halley.rune) template. Startup never modifies
+an existing config, and configs need no version marker. Optional compatibility
+updates are explicit and structurally detected: use `halleyctl config migrate
+--dry-run` to inspect them before running `halleyctl config migrate`. Migration
+adds only a finite set of known missing bindings or sections to compatible
+0.6-or-newer configs, skips conflicting custom chords, validates the complete
+candidate, writes atomically, and retains a timestamped backup. An incompatible
+pre-0.6 config is instead backed up and replaced with the current default. A
+gathered root reports that the file owning the affected section must be migrated
+directly rather than guessing where to write.
 
-Handled by `crates/halley-config`. Covers input settings like repeat/focus mode, keybinds, focus ring shape and size, decay threshold, max windows per Field, viewports, autostart programs and much **more**.
+Pass `-c PATH` or `--config PATH` to select another file. Valid edits reload as
+one atomic snapshot; invalid edits leave the last valid runtime state active.
+Nested Rune `gather` dependencies are watched recursively, including missing
+dependencies that are created after startup.
+
+A freshly generated config declares no startup clusters, so windows begin on the
+empty Field. The optional `autostart` section can still declare persistent named
+clusters using compact command arrays, including empty `members []`
+declarations. See
+[startup clusters](docs/clusters.md#startup-clusters) for syntax, launch
+attribution, output placement, and restart behavior.
+
+Useful controls:
+
+```sh
+halleyctl config verify
+halleyctl config edit
+halleyctl config migrate --dry-run
+halleyctl reload
+```
+
+`halleyctl` also exposes output and DPMS state, capture modes, node and cluster
+control, Trail, named-monitor focus, stack/tile navigation, Bearings, and portal
+diagnostics. Run `halleyctl --help` for the current command surface.
+
+---
+
+## API and External Tools
+
+[`halley-api`](docs/api.md) is the supported Rust boundary for launchers,
+panels, automation, tests, and desktop components. It provides typed commands
+and queries, structured errors, capability negotiation, persistent clients,
+and sequenced state subscriptions.
+
+The postcard-based `halley-ipc` crate is Halley's private transport codec, not
+an external compatibility contract. External programs should use
+`halley-api`; `halleyctl` and Halley Lift are reference consumers of that API.
+
+---
 
 ## Community / Support
 
-Halley has a Discord for practical support, bug triage, release updates, packaging discussion, and focused contributor coordination.
+Halley's Discord is for practical support, config help, bug triage, packaging,
+release updates, and focused contributor coordination. Halley remains
+maintainer-directed; Discord is not a roadmap vote.
 
-Halley remains maintainer-directed. Discord is not a roadmap vote or public steering committee. Please read the rules and start in `#intake` so you can be routed to support, config help, bugs, packaging, contributing, or release-only updates.
-
-Join the Discord: https://discord.gg/cjutpDv6q
-
-## Contributing
-
-View the [contributing](CONTRIBUTING.md) guidelines before making any pull requests.
+Join the Discord: https://discord.gg/J2ec3nbHYs
 
 ---
 
 ## Portals To Use
 
-- `xdg-desktop-portal-halley` for ScreenCast, including monitor and window sharing
-- `xdg-desktop-portal-gtk` for common desktop dialogs not implemented by Halley
+- `xdg-desktop-portal-halley` for screenshots and ScreenCast sources
+- `xdg-desktop-portal-gtk` for common desktop dialogs Halley does not provide
+
+Check the installed backend and advertised capture support with:
+
+```sh
+halleyctl portal status
+```
 
 ---
 
-## Website
+## References
 
-**Project website:** [saltnpepper97.github.io/halley-site](https://saltnpepper97.github.io/halley-site/)
+- [Configuration template](examples/halley.rune)
+- [Keybind triggers and actions](docs/keybinds.md)
+- [Compositor API](docs/api.md)
+- [Field behavior, maximize, zoom, and close succession](docs/field.md)
+- [Nodes, decay, focus rings, landmarks, and physics](docs/nodes.md)
+- [Bearings](docs/bearings.md)
+- [Apogee and Alt+Tab](docs/apogee.md)
+- [Animations](docs/animations.md)
+- [Window decorations](docs/decorations.md)
+- [Managed-window rules](docs/window-rules.md)
+- [Wallpaper](docs/wallpaper.md)
+- [Screen sharing and the desktop portal](docs/portal.md)
+- [Wayland protocol support](docs/wayland-protocols.md)
+- [XWayland policy and conformance](docs/xwayland.md)
+- [Building, session managers, and packaging](docs/packaging.md)
 
 ---
 
 ## Inspirations
 
-- [niri](https://github.com/niri-wm/niri) — for how to do Wayland compositor things in Rust
-- [vxwm](https://codeberg.org/wh1tepearl/vxwm) — for studying some of its eyecandy
-- [hevel](https://sr.ht/~dlm/hevel/) — for zoooooooom
-- [Hyprland](https://github.com/hyprwm/hyprland) — for some config organization and eyecandy
-- [newm](https://github.com/jbuchermn/newm) — Godfather of spatial compositing
+- [niri](https://github.com/niri-wm/niri) — compositor architecture and careful Wayland behavior
+- [vxwm](https://codeberg.org/wh1tepearl/vxwm) — visual experimentation
+- [hevel](https://sr.ht/~dlm/hevel/) — spatial zooming
+- [Hyprland](https://github.com/hyprwm/Hyprland) — configuration and visual ideas
+- [newm](https://github.com/jbuchermn/newm) — spatial compositing
 
 ---
 
 ## License
 
-Released under the [**GPL-3.0**](LICENSE) license.
-
----
-
-## Patches in this fork (Mikuri)
-
-This fork (`mikuri12/halley`) is upstream Halley v0.5.0 with six local
-fixes applied inline to `src/`. They're already in the tree you just
-cloned — no patch file you have to apply yourself. Summary of what they do
-and why:
-
-1. **Direct-scanout no longer disabled by pending frame-callbacks** — a
-   fullscreen client always has callbacks pending, and the old gate (which
-   turned off direct-scanout when callbacks were pending) made every
-   fullscreen game oscillate scanout ↔ GL and drop fps. The gate was
-   redundant: the direct-scanout path is already paced by page-flip +
-   presentation feedback. *(src/crates/halley-wl/src/backend/tty/drm.rs)*
-
-2. **Fullscreen apps cover the Top/Overlay layer-shell surfaces** — Halley
-   has no dedicated fullscreen render route, so the bar / notifications /
-   layer-shell launcher sat on top of a fullscreen app. The patch adds a
-   `current_monitor_has_settled_fullscreen` predicate and a
-   `suppress_top_overlay_layers` flag the frame builder consults to skip
-   drawing those layers when a fullscreen window is settled. The hit-test is
-   taught the same predicate, otherwise the layers stayed invisible but
-   clickable. *(drives: system.rs, draw.rs, scene.rs, surface.rs)*
-
-3. **`send_pending_configure()` instead of unconditional
-   `send_configure()`** — Chromium/Electron re-request `set_fullscreen`
-   when you switch tab/video, and the unconditional configure made them
-   re-show the "Press Esc to leave fullscreen" toast that never went away.
-   Now we use Smithay's dedup no-op. *(fullscreen/system.rs)*
-
-4. **Animated XCursor support (multi-frame)** — upstream kept only the
-   first frame of animated cursor themes, so every XCursors-animated theme
-   was stuck static. The patch adds a `FrameData{pixels_bgra, delay_ms}`
-   type, a `SoftwareCursorSprite::frame_at(elapsed_ms)` lookup, and the
-   `CursorManager` animation state. *(cursor_theme.rs, cursor.rs, draw.rs,
-   activity.rs, portal/mod.rs)*
-
-5. **Adaptive idle tick + display-fd in calloop** — the master calloop
-   timer re-armed on every iteration; the process never went idle even at
-   rest. Now it picks a slow `IDLE_TICK_MS` guard tick when no work is
-   pending, and registers the Wayland display fd in calloop so a client
-   commit wakes the loop by itself. *(backend/tty/mod.rs)*
-
-6. **CursorManager carried into the direct-scanout cursor path** — side
-   effect of fix #4: the direct-scanout cursor path read the global cache
-   directly, bypassing the animation state. The patch threads
-   `&mut CursorManager` down through the scanout path so the animation
-   keeps `started_at`/`cycle_ms` authoritative even when the cursor goes
-   out via the DRM HW plane. *(drm.rs)*
-
-These fixes are explained in code comments at the hunk they touch.
-
-### Why a separate fork?
-
-Honestly: I don't have experience writing compositors and I'm not sure these
-arreglos son the right way to fix these problems for everyone — they work on
-my setup but I don't want to push upstream something I'm not confident is the
-correct general fix. I'd rather keep them in a fork so anyone who wants to
-try Halley with Noctalia / Void / a similar layer-shell setup has something
-confortable to grab. If upstream wants to take any of them, cool — I'll be
-happier maintaining less code; if not, the fork is here.
-
----
-
-## Layout of this repo
-
-```
-.
-├── README.md        # this file (upstream README + the patches section above)
-├── src/             # upstream Halley v0.5.0 with the 6 fixes already applied
-│   ├── crates/      #   Cargo workspace (halley-wl = main crate)
-│   ├── packaging/   #   upstream wayland-sessions .desktop, systemd-user units,
-│   │                #   xdg-desktop-portal config, dbus services
-│   └── Cargo.toml    #   workspace manifest
-├── void/            # Void Linux packaging (xbps-src template + session wrapper)
-│   ├── template         #   xbps-src template (downloads src via distfiles, builds, installs)
-│   ├── halley-session  #   wrapper with the dbus-run-session guard for runit/no-systemd
-│   ├── halley.desktop   #   wayland-sessions .desktop pointing at /usr/bin/halley-session
-│   ├── halley.portal       #   xdg-desktop-portal backend metadata
-│   ├── halley-portals.conf #   portal routing (ScreenCast/Screenshot -> halley backend)
-│   └── README.md        #   build & install notes for Void
-├── nix/             # Nix flake exposing the package + an HM configuration
-│   ├── flake.nix        #   packages.halley + homeConfigurations.mikuri
-│   └── halley.nix       #   Rust derivation (callPackage-able)
-└── LICENSE / CONTRIBUTING.md / CHANGELOG.md  # straight from upstream
-```
+Halley is distributed under the GPL-3.0-only license.
