@@ -1,0 +1,46 @@
+decorations:
+  border:
+    colour-focused "#a68866"
+    colour-unfocused "#a68866"
+  end
+  secondary-border:
+    colour-focused "#181410"
+    colour-unfocused "#181410"
+  end
+end
+
+node:
+  background-colour "#241e18"
+end
+
+overlays:
+  background-colour "#181410"
+  text-colour "#f5efe5"
+  error-colour "#b87a59"
+end
+
+field:
+  pins:
+    colour "#181410"
+    background-colour "#a68866"
+  end
+end
+
+background:
+  colour "#181410"
+  accent-colour "#8f7459"
+end
+
+effects:
+  shadows:
+    window:
+      colour "#181410"
+    end
+    node:
+      colour "#181410"
+    end
+    overlay:
+      colour "#181410"
+    end
+  end
+end
