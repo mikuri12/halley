@@ -161,7 +161,7 @@ impl UiTextRenderer {
     ) -> Option<Option<(String, smithay::utils::Size<i32, smithay::utils::Physical>)>> {
         let entry = self.fitted_titles.get_mut(key)?;
         entry.last_used = Instant::now();
-        entry.fitted.clone()
+        Some(entry.fitted.clone())
     }
 
     /// Store a fitted-title result (including a "did not fit" outcome) so
