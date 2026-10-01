@@ -56,7 +56,7 @@ pub struct UiTextRenderer {
     /// title + max width + scale bits. Avoids re-running the search every
     /// frame for titles whose fit does not change; entries expire with the
     /// same TTL as the texture cache they depend on.
-    fitted_titles: HashMap<(String, i32, u32), Option<FittedTitleEntry>, },
+    fitted_titles: HashMap<(String, i32, u32), Option<FittedTitleEntry>>,
     /// Stable element identities, keyed by what the label *is* rather than by
     /// its call site, so the nineteen `element()` callers need not each invent
     /// and thread a slot name.

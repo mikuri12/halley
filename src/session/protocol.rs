@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use calloop::generic::Generic;
 use calloop::{EventLoop, Interest, Mode as CalloopMode, PostAction};
 use smithay::backend::allocator::dmabuf::Dmabuf;
+use smithay::input::keyboard::LedState;
 use smithay::input::pointer::PointerHandle;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::Output;
@@ -1244,6 +1245,20 @@ impl<D: SessionDriver> SeatHandler for Session<D> {
             self.pointer.position(),
         );
         self.request_redraw();
+    }
+
+    /// Propagate the keyboard LED state (Caps/Num/Scroll Lock) to the
+    /// backend's physical devices.
+    ///
+    /// Smithay tracks the LED state inside its xkb state and calls this hook
+    /// whenever it *changes*, but the trait default is an empty body. Without
+    /// overriding it `libinput_device_led_update()` is never reached and the
+    /// kernel keeps whatever LED mask the session started with — the lights
+    /// freeze while the modifier state itself keeps working. The winit/nested
+    /// backend owns no devices, so its `sync_keyboard_leds` is a no-op and
+    /// the host compositor keeps driving its LEDs.
+    fn led_state_changed(&mut self, _seat: &Seat<Self>, led_state: LedState) {
+        self.driver.sync_keyboard_leds(led_state.into());
     }
 }
 

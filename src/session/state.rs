@@ -104,6 +104,15 @@ pub trait OutputDriver: crate::ipc::OutputInfoSource + 'static {
 pub trait SessionDriver: RenderDriver + OutputDriver + 'static {
     const BACKEND_KIND: crate::input::keybinds::BackendKind;
     fn stop(&mut self);
+
+    /// Push a keyboard LED mask (Caps/Num/Scroll Lock) to the backend's
+    /// physical devices.
+    ///
+    /// The kernel never updates keyboard LEDs on its own; the compositor must
+    /// call `libinput_device_led_update()` when the xkb LED state changes.
+    /// Only the TTY backend owns real devices, so the default is a no-op and
+    /// nested winit sessions keep letting the host compositor drive LEDs.
+    fn sync_keyboard_leds(&mut self, _leds: smithay::reexports::input::Led) {}
 }
 
 /// Backend-independent compositor state.

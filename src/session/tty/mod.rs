@@ -242,6 +242,10 @@ impl super::SessionDriver for TtyDriver {
     fn stop(&mut self) {
         self.loop_signal.stop();
     }
+
+    fn sync_keyboard_leds(&mut self, leds: smithay::reexports::input::Led) {
+        self.physical_input.sync_keyboard_leds(leds);
+    }
 }
 
 type TtyApp = super::Session<TtyDriver>;
@@ -629,6 +633,15 @@ pub fn run(explicit_config_path: Option<std::path::PathBuf>) {
                         .added(device.clone(), &app.settings.input);
                     if first_touch && app.seat.get_touch().is_none() {
                         app.seat.add_touch();
+                    }
+                    // Smithay only fires led_state_changed() on *changes*: a
+                    // keyboard present at startup (or plugged in mid-session)
+                    // would otherwise keep the kernel's stale LED mask instead
+                    // of the current Caps/Num/Scroll Lock state.
+                    if let Some(keyboard) = app.seat.get_keyboard() {
+                        let leds: smithay::reexports::input::Led =
+                            keyboard.led_state().into();
+                        app.driver.sync_keyboard_leds(leds);
                     }
                 }
                 smithay::backend::input::InputEvent::DeviceRemoved { device }

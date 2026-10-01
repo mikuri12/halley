@@ -737,6 +737,19 @@ fn optional_number(
     match field(fields, key) {
         None => Ok(None),
         Some(Value::Number(value)) if value.is_finite() => Ok(Some(*value)),
+        // The rune-cfg lexer (0.7.x) cannot tokenize a value starting with
+        // '-', so negative numbers like `accel-speed -1.0` are a hard syntax
+        // error and must be written quoted: `accel-speed "-1.0"`. Accept the
+        // quoted form here so negative settings actually apply.
+        Some(Value::String(value)) => value
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|parsed| parsed.is_finite())
+            .map(Ok)
+            .ok_or_else(|| {
+                InputParseError(format!("{path}.{key} must be a finite number"))
+            }),
         Some(_) => Err(InputParseError(format!(
             "{path}.{key} must be a finite number"
         ))),
@@ -857,6 +870,46 @@ end
         assert_eq!(input.mouse.accel_profile, Some(AccelProfile::Flat));
         assert_eq!(input.mouse.scroll_method, Some(ScrollMethod::OnButtonDown));
         assert_eq!(input.mouse.scroll_button, Some(274));
+    }
+
+    #[test]
+    fn parses_negative_numbers_written_quoted() {
+        // The rune-cfg 0.7 lexer cannot tokenize a leading '-', so negative
+        // libinput values must be written as quoted strings. The parser
+        // accepts both the quoted form and rejects nothing that worked before.
+        let input = parse(
+            r#"
+input:
+  mouse:
+    accel-speed "-1.0"
+    accel-profile "flat"
+  end
+  touchpad:
+    accel-speed "-0.35"
+  end
+end
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(input.mouse.accel_speed, Some(-1.0));
+        assert_eq!(input.mouse.accel_profile, Some(AccelProfile::Flat));
+        assert_eq!(input.touchpad.accel_speed, Some(-0.35));
+    }
+
+    #[test]
+    fn rejects_non_numeric_quoted_values() {
+        let error = parse(
+            r#"
+input:
+  mouse:
+    accel-speed "fast"
+  end
+end
+"#,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("must be a finite number"));
     }
 
     #[test]

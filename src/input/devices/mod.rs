@@ -64,6 +64,21 @@ impl PhysicalInputDevices {
             apply(&mut managed.device, managed.kind, &managed.defaults, input);
         }
     }
+
+    /// Push a keyboard LED mask (Caps/Num/Scroll Lock) to every managed
+    /// device.
+    ///
+    /// The kernel never updates keyboard LEDs on its own: userspace must call
+    /// `libinput_device_led_update()` whenever the xkb LED state changes.
+    /// Smithay only invokes `SeatHandler::led_state_changed()` on *changes*,
+    /// so this is also called on device add to give keyboards plugged in
+    /// mid-session (or present at startup) the current mask instead of the
+    /// stale one the kernel booted with. Devices without LEDs ignore it.
+    pub fn sync_keyboard_leds(&mut self, leds: smithay::reexports::input::Led) {
+        for managed in &mut self.devices {
+            managed.device.led_update(leds);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
