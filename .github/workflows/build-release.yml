@@ -44,7 +44,7 @@ jobs:
                 clang19-devel libclang19 wayland-devel libxkbcommon-devel \
                 libinput-devel libseat-devel libudev-devel libgbm-devel \
                 libdrm-devel libglvnd-devel pixman-devel dbus-devel \
-                pipewire-devel
+                pipewire-devel libdisplay-info-devel
 
               # El workspace vive en la raíz del repo (upstream 0.8.0 layout).
               cargo build --release --workspace --locked

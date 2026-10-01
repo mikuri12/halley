@@ -22,7 +22,7 @@ build_style=cargo
 hostmakedepends="pkg-config rust cargo"
 makedepends="clang19-devel libclang19 wayland-devel libxkbcommon-devel
  libinput-devel libseat-devel libudev-devel libgbm-devel libdrm-devel
- libglvnd-devel pixman-devel dbus-devel pipewire-devel"
+ libglvnd-devel pixman-devel dbus-devel pipewire-devel libdisplay-info-devel"
 depends="xwayland-satellite dbus seatd"
 short_desc="Spatial Wayland compositor (Mikuri fork synced with upstream 0.8.0)"
 maintainer="mikuri12 <https://github.com/mikuri12>"

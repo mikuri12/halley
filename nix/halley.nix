@@ -24,6 +24,7 @@
   libgbm,
   libdrm,
   libglvnd,
+  libdisplay-info,
   pixman,
   pipewire,
   xwayland-satellite,
@@ -63,6 +64,7 @@ in
       libgbm # backend_gbm
       libdrm # backend_drm
       libglvnd # backend_egl / renderer_gl
+      libdisplay-info # libdisplay-info-sys (EDID parsing via smithay)
       pixman
       dbus # IPC / portal
       pipewire # libspa-sys / portal screencast
