@@ -741,15 +741,12 @@ fn optional_number(
         // '-', so negative numbers like `accel-speed -1.0` are a hard syntax
         // error and must be written quoted: `accel-speed "-1.0"`. Accept the
         // quoted form here so negative settings actually apply.
-        Some(Value::String(value)) => value
-            .trim()
-            .parse::<f64>()
-            .ok()
-            .filter(|parsed| parsed.is_finite())
-            .map(Ok)
-            .ok_or_else(|| {
-                InputParseError(format!("{path}.{key} must be a finite number"))
-            }),
+        Some(Value::String(value)) => match value.trim().parse::<f64>() {
+            Ok(parsed) if parsed.is_finite() => Ok(Some(parsed)),
+            _ => Err(InputParseError(format!(
+                "{path}.{key} must be a finite number"
+            ))),
+        },
         Some(_) => Err(InputParseError(format!(
             "{path}.{key} must be a finite number"
         ))),
