@@ -1151,6 +1151,15 @@ struct FittedTitle {
     size: smithay::utils::Size<i32, smithay::utils::Physical>,
 }
 
+/// Cache key for a fitted (ellipsized) title. `fitted_title` runs a binary
+/// search whose every step re-measures candidate strings through the glyph
+/// pipeline; with a camera panning under a stack of titled windows that is
+/// dozens of shape runs per frame for strings that barely change. Keying on
+/// the raw title + width + scale lets repeated frames skip the search.
+fn fitted_title_cache_key(title: &str, max_width: i32, scale: f32) -> (String, i32, u32) {
+    (title.to_string(), max_width, scale.to_bits())
+}
+
 fn fitted_title(
     renderer: &mut GlesRenderer,
     ui_text: &mut crate::render::text::UiTextRenderer,
@@ -1163,6 +1172,16 @@ fn fitted_title(
     if max_width <= 0 || title.is_empty() {
         return Ok(None);
     }
+    // Fast path: the same title was fitted at this exact width+scale during a
+    // recent frame. The UiTextRenderer texture cache keeps the measurement
+    // alive; this skips the whole binary search for unchanged titles.
+    let cache_key = fitted_title_cache_key(title, max_width, scale);
+    if let Some(hit) = ui_text.fitted_title_cache_get(&cache_key) {
+        return Ok(Some(FittedTitle {
+            text: hit.text.clone(),
+            size: hit.size,
+        }));
+    }
     let mut measure =
         |ui_text: &mut crate::render::text::UiTextRenderer, text: &str| match text_size_px {
             Some(size_px) => ui_text.measure_at_size(renderer, text, rgb, size_px),
@@ -1171,10 +1190,16 @@ fn fitted_title(
     if let Some(native_size) = measure(ui_text, title)?
         && scaled_title_size(native_size, scale).w <= max_width
     {
-        return Ok(Some(FittedTitle {
+        let fitted = FittedTitle {
             text: title.to_string(),
             size: scaled_title_size(native_size, scale),
-        }));
+        };
+        ui_text.fitted_title_cache_put(
+            cache_key,
+            Some(fitted.text.clone()),
+            Some(fitted.size),
+        );
+        return Ok(Some(fitted));
     }
     let characters = title.chars().collect::<Vec<_>>();
     let mut low = 0;
@@ -1201,6 +1226,17 @@ fn fitted_title(
         } else {
             high = middle - 1;
         }
+    }
+    if let Some(best) = best.as_ref() {
+        ui_text.fitted_title_cache_put(
+            cache_key,
+            Some(best.text.clone()),
+            Some(best.size),
+        );
+    } else {
+        // Nothing fit (empty title after ellipsis): cache the miss too so a
+        // pathological width does not re-run the search every frame.
+        ui_text.fitted_title_cache_put(cache_key, None, None);
     }
     Ok(best)
 }

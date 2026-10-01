@@ -52,6 +52,11 @@ pub struct UiTextRenderer {
     swash_cache: SwashCache,
     font: halley_config::Font,
     text: HashMap<TextKey, TextTexture>,
+    /// Fitted-title results (ellipsis binary-search output), keyed by raw
+    /// title + max width + scale bits. Avoids re-running the search every
+    /// frame for titles whose fit does not change; entries expire with the
+    /// same TTL as the texture cache they depend on.
+    fitted_titles: HashMap<(String, i32, u32), Option<FittedTitleEntry>, },
     /// Stable element identities, keyed by what the label *is* rather than by
     /// its call site, so the nineteen `element()` callers need not each invent
     /// and thread a slot name.
@@ -71,6 +76,13 @@ fn text_key_hash(key: &TextKey) -> u64 {
     hasher.finish()
 }
 
+/// A fitted-title cache entry: the ellipsized text plus its measured size.
+pub struct FittedTitleEntry {
+    pub text: String,
+    pub size: smithay::utils::Size<i32, smithay::utils::Physical>,
+    last_used: Instant,
+}
+
 impl Default for UiTextRenderer {
     fn default() -> Self {
         Self::new(&halley_config::Font::default())
@@ -85,6 +97,7 @@ impl UiTextRenderer {
             swash_cache: SwashCache::new(),
             font: font.clone(),
             text: HashMap::new(),
+            fitted_titles: HashMap::new(),
             ids: super::ids::ElementIds::default(),
             occurrences: HashMap::new(),
         }
@@ -94,6 +107,15 @@ impl UiTextRenderer {
     pub fn begin_scene(&mut self) {
         self.occurrences.clear();
         self.ids.advance();
+        // Age out stale text textures once per scene instead of on every
+        // prepare: the retain() walk over the texture map is O(labels) and
+        // this function is called once per output frame, while prepare_key()
+        // runs several times per element (measure + element + title fitting).
+        let now = Instant::now();
+        self.text
+            .retain(|_, entry| now.saturating_duration_since(entry.last_used) < TEXT_CACHE_TTL);
+        self.fitted_titles
+            .retain(|_, entry| now.saturating_duration_since(entry.last_used) < TEXT_CACHE_TTL);
     }
 
     /// Replace global typography atomically and report whether a frame must
@@ -105,6 +127,7 @@ impl UiTextRenderer {
         }
         self.font = font.clone();
         self.text.clear();
+        self.fitted_titles.clear();
         true
     }
 
@@ -125,6 +148,37 @@ impl UiTextRenderer {
         size_px: u16,
     ) -> Result<Option<smithay::utils::Size<i32, Buffer>>, Box<dyn Error>> {
         self.measure_with_size(renderer, text, rgb, Some(size_px))
+    }
+
+    /// Look up a previously fitted title for this raw title at this exact
+    /// max-width/scale. Called by the titlebar scene builder before it
+    /// re-runs the ellipsis binary search.
+    pub fn fitted_title_cache_get(
+        &mut self,
+        key: &(String, i32, u32),
+    ) -> Option<&FittedTitleEntry> {
+        let entry = self.fitted_titles.get_mut(key)?;
+        entry.last_used = Instant::now();
+        Some(entry)
+    }
+
+    /// Store a fitted-title result (including a "did not fit, ellipsized"
+    /// outcome) so later frames with the same constraints skip the search.
+    pub fn fitted_title_cache_put(
+        &mut self,
+        key: (String, i32, u32),
+        text: Option<String>,
+        size: Option<smithay::utils::Size<i32, smithay::utils::Physical>>,
+    ) {
+        let value = match (text, size) {
+            (Some(text), Some(size)) => Some(FittedTitleEntry {
+                text,
+                size,
+                last_used: Instant::now(),
+            }),
+            _ => None,
+        };
+        self.fitted_titles.insert(key, value);
     }
 
     fn measure_with_size(
@@ -290,8 +344,6 @@ impl UiTextRenderer {
         }
         self.ensure_context(renderer);
         let now = Instant::now();
-        self.text
-            .retain(|_, entry| now.saturating_duration_since(entry.last_used) < TEXT_CACHE_TTL);
         let key = TextKey {
             text: text.to_string(),
             family: normalized_family(&self.font),
