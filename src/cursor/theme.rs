@@ -118,18 +118,23 @@ fn nearest_images(images: Vec<Image>, requested_size: u32) -> Vec<Image> {
 }
 
 fn prepare_frame(image: Image, scale: i32) -> CursorFrame {
+    // Xcursor files store pixels as 32-bit ARGB little-endian, which lands in
+    // memory as [B, G, R, A] per pixel. Fourcc::Abgr8888 describes memory as
+    // [R, G, B, A], so handing the file bytes to it swaps red and blue and
+    // inverts the cursor's colors. Declare the buffer as Argb8888 ([B, G, R,
+    // A] in memory) instead; no byte swap needed.
     let buffer = MemoryRenderBuffer::from_slice(
         &image.pixels_rgba,
-        Fourcc::Abgr8888,
+        Fourcc::Argb8888,
         (image.width as i32, image.height as i32),
         scale,
         Transform::Normal,
         None,
     );
-    let mut metadata_bgra = image.pixels_rgba;
-    for pixel in metadata_bgra.chunks_exact_mut(4) {
-        pixel.swap(0, 2);
-    }
+    let metadata_bgra = image.pixels_rgba;
+    // The file bytes are already [B, G, R, A] in memory (ARGB
+    // little-endian), which is exactly the BGRA layout PipeWire expects —
+    // the previous R/B swap here fed inverted colors to screen recordings.
     CursorFrame {
         buffer,
         metadata_bgra: metadata_bgra.into(),

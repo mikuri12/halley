@@ -90,18 +90,17 @@ const DARK_TEXT: OverlayRgb = OverlayRgb {
     b: 0.98,
     a: 1.0,
 };
-const HALLEY_ACCENT: OverlayRgb = OverlayRgb {
-    r: 0xd6 as f32 / 255.0,
-    g: 0x5d as f32 / 255.0,
-    b: 0x26 as f32 / 255.0,
-    a: 1.0,
-};
+// Halley's brand accent was #d65d26 (0xd6, 0x5d, 0x26). It was the default
+// overlay border color in Auto mode, which read as stray orange dots around
+// the Field (the Bearings markers far from their windows). Auto now derives
+// the border from the fill palette; set an explicit overlays.border-colour
+// of #d65d26 in the config if you want the old look back.
 
 pub fn resolve_visuals(config: &halley_config::Overlays) -> OverlayVisuals {
     let fill = resolve_fill(config.background_color);
     let text = resolve_text(config.text_color, fill);
     let error = resolve_error(config.error_color);
-    let border = resolve_border(config.border_color);
+    let border = resolve_border(config.border_color, fill);
     OverlayVisuals {
         fill,
         text,
@@ -158,13 +157,35 @@ fn resolve_error(mode: halley_config::OverlayColorMode) -> OverlayRgb {
     }
 }
 
-fn resolve_border(mode: halley_config::OverlayColorMode) -> OverlayRgb {
+fn resolve_border(mode: halley_config::OverlayColorMode, fill: OverlayRgb) -> OverlayRgb {
     match mode {
         halley_config::OverlayColorMode::Fixed { r, g, b, a } => OverlayRgb { r, g, b, a },
+        // Auto/System/Light/Dark used to force Halley's orange brand accent,
+        // which read as stray orange dots (Bearings markers far from their
+        // windows). Derive the border from the fill instead so overlays stay
+        // in one palette; an explicit overlays.border-colour still overrides.
         halley_config::OverlayColorMode::Auto
         | halley_config::OverlayColorMode::System
         | halley_config::OverlayColorMode::Light
-        | halley_config::OverlayColorMode::Dark => HALLEY_ACCENT,
+        | halley_config::OverlayColorMode::Dark => text_border_for(fill),
+    }
+}
+
+fn text_border_for(fill: OverlayRgb) -> OverlayRgb {
+    if fill.luminance() < 0.45 {
+        OverlayRgb {
+            r: 0.15,
+            g: 0.17,
+            b: 0.20,
+            a: 1.0,
+        }
+    } else {
+        OverlayRgb {
+            r: 0.94,
+            g: 0.96,
+            b: 0.98,
+            a: 1.0,
+        }
     }
 }
 
@@ -626,7 +647,7 @@ fn resolve_zoom_indicator_visuals(
         visuals.text = resolve_text(mode, visuals.fill);
     }
     if let Some(mode) = config.border_color {
-        visuals.border = resolve_border(mode);
+        visuals.border = resolve_border(mode, visuals.fill);
     }
     if let Some(borders) = config.borders {
         visuals.border_px = if borders {
@@ -723,6 +744,46 @@ mod tests {
             ..halley_config::Overlays::default()
         };
         assert_eq!(resolve_visuals(&config).text, DARK_TEXT);
+    }
+
+    #[test]
+    fn auto_border_follows_fill_palette_instead_of_brand_accent() {
+        // Auto used to force the #d65d26 brand accent as the overlay border,
+        // which read as stray orange dots (Bearings markers). It must now
+        // derive from the fill palette.
+        let visuals = resolve_visuals(&halley_config::Overlays::default());
+        assert_ne!(
+            (visuals.border.r, visuals.border.g, visuals.border.b),
+            (0xd6 as f32 / 255.0, 0x5d as f32 / 255.0, 0x26 as f32 / 255.0)
+        );
+
+        let config = halley_config::Overlays {
+            background_color: halley_config::OverlayColorMode::Dark,
+            ..halley_config::Overlays::default()
+        };
+        let dark = resolve_visuals(&config);
+        assert_ne!(
+            (dark.border.r, dark.border.g, dark.border.b),
+            (0xd6 as f32 / 255.0, 0x5d as f32 / 255.0, 0x26 as f32 / 255.0)
+        );
+    }
+
+    #[test]
+    fn fixed_border_color_still_overrides_the_palette() {
+        let config = halley_config::Overlays {
+            border_color: halley_config::OverlayColorMode::Fixed {
+                r: 0.5,
+                g: 0.25,
+                b: 0.75,
+                a: 1.0,
+            },
+            ..halley_config::Overlays::default()
+        };
+        let visuals = resolve_visuals(&config);
+        assert_eq!(
+            (visuals.border.r, visuals.border.g, visuals.border.b),
+            (0.5, 0.25, 0.75)
+        );
     }
 
     #[test]
