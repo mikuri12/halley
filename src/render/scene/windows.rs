@@ -805,6 +805,82 @@ pub(super) fn live_window_elements(
             elements.extend(strips.into_iter().map(SceneElement::Border));
         }
     }
+
+    // Secondary (outer) border: a second frame outside the primary one,
+    // separated by a configurable gap. Ported from the pre-0.6 fork's
+    // `secondary-border` decorations section; disabled unless configured.
+    let secondary = context.decorations.secondary_border;
+    if managed
+        && secondary.enabled
+        && secondary.size_px > 0
+        && chrome_alpha > 0.0
+    {
+        let outset = border_width.max(0) + secondary.gap_px.max(0);
+        let rect = Rectangle::new(
+            (
+                visual.animated_rect.loc.x - outset,
+                visual.animated_rect.loc.y - outset,
+            )
+                .into(),
+            (
+                (visual.animated_rect.size.w + outset * 2).max(1),
+                (visual.animated_rect.size.h + outset * 2).max(1),
+            )
+                .into(),
+        );
+        let secondary_color = if is_focused {
+            smithay::backend::renderer::Color32F::from([
+                secondary.color_focused.r,
+                secondary.color_focused.g,
+                secondary.color_focused.b,
+                1.0,
+            ])
+        } else {
+            smithay::backend::renderer::Color32F::from([
+                secondary.color_unfocused.r,
+                secondary.color_unfocused.g,
+                secondary.color_unfocused.b,
+                1.0,
+            ])
+        };
+        // The secondary border hugs the primary border's outer radius, so
+        // its own content radius grows by the same outset it sits at.
+        let secondary_radius = (content_radius + outset as f32).max(0.0);
+        if rounded_available
+            && let Some(border) = window_decoration_renderer.border_element(
+                renderer,
+                crate::render::window_decoration::surface_slot_for_instance(
+                    window_surface.as_ref(),
+                    crate::render::window_decoration::slot::SECONDARY_BORDER,
+                    context.instance_identity,
+                ),
+                rect,
+                secondary.size_px,
+                secondary_radius,
+                secondary_color,
+                chrome_alpha,
+            )
+        {
+            elements.push(SceneElement::WindowBorder(border));
+        } else {
+            let strips: Vec<_> = crate::render::border_strips(
+                std::array::from_fn(|index| {
+                    crate::render::window_decoration::surface_slot_for_instance(
+                        window_surface.as_ref(),
+                        crate::render::window_decoration::slot::SECONDARY_BORDER_FALLBACK
+                            + index,
+                        context.instance_identity,
+                    )
+                }),
+                rect,
+                secondary.size_px,
+                secondary_color * chrome_alpha,
+            )
+            .into_iter()
+            .collect();
+            elements.extend(strips.into_iter().map(SceneElement::Border));
+        }
+    }
     if managed && chrome_alpha > 0.0 {
         let border_outset = border_width.max(0);
         let caster = if server_titlebar {

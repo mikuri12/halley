@@ -107,7 +107,39 @@ pub struct Decorations {
     pub border_color_focused: BorderColor,
     pub border_color_unfocused: BorderColor,
     pub resize_using_border: bool,
+    pub secondary_border: SecondaryBorder,
     pub titlebars: Titlebars,
+}
+
+/// A second border drawn outside the primary one, separated by a gap.
+/// Disabled by default; mirrors old halley's `SecondaryBorderConfig`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SecondaryBorder {
+    pub enabled: bool,
+    pub size_px: i32,
+    pub gap_px: i32,
+    pub color_focused: BorderColor,
+    pub color_unfocused: BorderColor,
+}
+
+impl Default for SecondaryBorder {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            size_px: 4,
+            gap_px: 0,
+            color_focused: BorderColor {
+                r: 0xfa as f32 / 255.0,
+                g: 0xbd as f32 / 255.0,
+                b: 0x2f as f32 / 255.0,
+            },
+            color_unfocused: BorderColor {
+                r: 0x1f as f32 / 255.0,
+                g: 0x1f as f32 / 255.0,
+                b: 0x1f as f32 / 255.0,
+            },
+        }
+    }
 }
 
 impl Default for Decorations {
@@ -127,6 +159,7 @@ impl Default for Decorations {
                 b: 0x59 as f32 / 255.0,
             },
             resize_using_border: true,
+            secondary_border: SecondaryBorder::default(),
             titlebars: Titlebars::default(),
         }
     }
@@ -274,7 +307,44 @@ pub fn parse_decorations(config: &RuneConfig) -> Decorations {
             "decorations.resize-using-border",
             defaults.resize_using_border,
         ),
+        secondary_border: parse_secondary_border(config, defaults.secondary_border),
         titlebars,
+    }
+}
+
+fn parse_secondary_border(config: &RuneConfig, defaults: SecondaryBorder) -> SecondaryBorder {
+    let enabled = config.get_or(
+        "decorations.secondary-border.enabled",
+        defaults.enabled,
+    );
+    let size_px = config
+        .get_or("decorations.secondary-border.size", defaults.size_px)
+        .clamp(0, 32);
+    let gap_px = config
+        .get_or("decorations.secondary-border.gap", defaults.gap_px)
+        .clamp(0, 64);
+    let color_focused = parse_color(
+        config,
+        &[
+            "decorations.secondary-border.colour-focused",
+            "decorations.secondary-border.color-focused",
+        ],
+        defaults.color_focused,
+    );
+    let color_unfocused = parse_color(
+        config,
+        &[
+            "decorations.secondary-border.colour-unfocused",
+            "decorations.secondary-border.color-unfocused",
+        ],
+        defaults.color_unfocused,
+    );
+    SecondaryBorder {
+        enabled,
+        size_px,
+        gap_px,
+        color_focused,
+        color_unfocused,
     }
 }
 

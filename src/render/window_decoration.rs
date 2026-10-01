@@ -41,6 +41,9 @@ pub mod slot {
     pub const TITLEBAR_GLYPH: usize = 32;
     pub const BORDER_FALLBACK: usize = 48;
     pub const BODY_BORDER_FALLBACK: usize = 56;
+    /// Secondary (outer) border and its coherent-square fallback strips.
+    pub const SECONDARY_BORDER: usize = 64;
+    pub const SECONDARY_BORDER_FALLBACK: usize = 72;
 }
 
 /// Stable identity for one decoration part of `surface`.
