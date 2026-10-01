@@ -46,12 +46,13 @@ pub use bootstrap::{
 };
 pub use chord::parse_chord;
 pub use clusters::{
-    ClusterBloomDirection, ClusterLayout, ClusterStacking, ClusterTiling, Clusters, parse_clusters,
+    ClusterBloomDirection, ClusterCoreShape, ClusterLayout, ClusterStacking, ClusterTiling,
+    Clusters, parse_clusters,
 };
 pub use cursor::{Cursor, parse_cursor};
 pub use decorations::{
-    BorderColor, Decorations, TitlebarButtonPosition, TitlebarContentPosition, Titlebars,
-    load_decorations, parse_decorations,
+    BorderColor, Decorations, SecondaryBorder, TitlebarButtonPosition, TitlebarContentPosition,
+    Titlebars, load_decorations, parse_decorations,
 };
 pub use diagnostic::ConfigDiagnostic;
 pub use effects::{

@@ -297,13 +297,14 @@ pub(super) fn cluster_elements(
                     )?,
                 };
                 elements.push(SceneElement::ClusterIcon(icon));
-                elements.push(SceneElement::ClusterCore(cluster_renderer.core(
+                elements.push(SceneElement::ClusterCore(cluster_renderer.core_with_shape(
                     renderer,
                     button,
                     ring,
                     fill,
                     nodes.config.opacity,
                     false,
+                    clusters.config().core_shape,
                 )?));
             }
         }
@@ -321,13 +322,14 @@ pub(super) fn cluster_elements(
                 nodes.config.opacity,
             )?));
         }
-        elements.push(SceneElement::ClusterCore(cluster_renderer.core(
+        elements.push(SceneElement::ClusterCore(cluster_renderer.core_with_shape(
             renderer,
             destination,
             core_border,
             fill,
             nodes.config.opacity,
             visual_flags.join_border_ready,
+            clusters.config().core_shape,
         )?));
         if let Some(shadow) = shadow_renderer.element(
             renderer,

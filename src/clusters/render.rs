@@ -17,6 +17,7 @@ use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Buffer, Logical, Physical, Rectangle, Scale, Transform};
 
 const CIRCLE_SHADER: &str = include_str!("shaders/node_circle_shader.frag");
+const SQUARE_SHADER: &str = include_str!("shaders/node_square_shader.frag");
 const CLUSTER_ICON: &[u8] = include_bytes!("assets/clusters.svg");
 const EDIT_ICON: &[u8] = include_bytes!("../../assets/edit.svg");
 const CLOSE_ICON: &[u8] = include_bytes!("../../assets/titlebars/close.svg");
@@ -27,6 +28,7 @@ struct Resources {
     context: ContextId<GlesTexture>,
     texture: GlesTexture,
     circle: GlesTexProgram,
+    square: GlesTexProgram,
     icon_colors: [[u8; 4]; 2],
     icons: [GlesTexture; 2],
 }
@@ -89,8 +91,36 @@ impl ClusterRenderer {
         opacity: f32,
         join_ready: bool,
     ) -> Result<ClusterCoreElement, Box<dyn Error>> {
-        let mut element =
-            self.core_with_alpha(renderer, destination, border_rgb, fill_rgb, opacity, 1.0)?;
+        self.core_with_shape(
+            renderer,
+            destination,
+            border_rgb,
+            fill_rgb,
+            opacity,
+            join_ready,
+            halley_config::ClusterCoreShape::Circle,
+        )
+    }
+
+    pub fn core_with_shape(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        destination: Rectangle<i32, Physical>,
+        border_rgb: (f32, f32, f32),
+        fill_rgb: (f32, f32, f32),
+        opacity: f32,
+        join_ready: bool,
+        shape: halley_config::ClusterCoreShape,
+    ) -> Result<ClusterCoreElement, Box<dyn Error>> {
+        let mut element = self.core_element(
+            renderer,
+            destination,
+            border_rgb,
+            fill_rgb,
+            opacity,
+            1.0,
+            shape,
+        )?;
         if join_ready {
             element.border.3 = join_ready_border_fraction(destination);
             element.commit = core_commit(
@@ -113,9 +143,34 @@ impl ClusterRenderer {
         opacity: f32,
         alpha: f32,
     ) -> Result<ClusterCoreElement, Box<dyn Error>> {
+        self.core_element(
+            renderer,
+            destination,
+            border_rgb,
+            fill_rgb,
+            opacity,
+            alpha,
+            halley_config::ClusterCoreShape::Circle,
+        )
+    }
+
+    fn core_element(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        destination: Rectangle<i32, Physical>,
+        border_rgb: (f32, f32, f32),
+        fill_rgb: (f32, f32, f32),
+        opacity: f32,
+        alpha: f32,
+        shape: halley_config::ClusterCoreShape,
+    ) -> Result<ClusterCoreElement, Box<dyn Error>> {
         let id = self.dynamic_id(0);
         self.ensure(renderer, [[255; 4]; 2])?;
         let resources = self.resources.as_ref().expect("resources ensured above");
+        let program = match shape {
+            halley_config::ClusterCoreShape::Circle => resources.circle.clone(),
+            halley_config::ClusterCoreShape::Square => resources.square.clone(),
+        };
         let source = Rectangle::<f64, Logical>::new(
             (0.0, 0.0).into(),
             (
@@ -139,7 +194,7 @@ impl ClusterRenderer {
                 Kind::Unspecified,
             ),
             texture: resources.texture.clone(),
-            program: resources.circle.clone(),
+            program,
             border: (border_rgb.0, border_rgb.1, border_rgb.2, 3.0 / 26.0),
             fill: (fill_rgb.0, fill_rgb.1, fill_rgb.2, 1.0),
             fill_alpha: opacity.clamp(0.0, 1.0),
@@ -313,6 +368,7 @@ impl ClusterRenderer {
             UniformName::new("fill_alpha", UniformType::_1f),
         ];
         let circle = renderer.compile_custom_texture_shader(CIRCLE_SHADER, &uniforms)?;
+        let square = renderer.compile_custom_texture_shader(SQUARE_SHADER, &uniforms)?;
         let [unfocused, focused] = icon_colors.map(|color| {
             let raster = raster_icon(color).ok_or("cluster SVG could not be rasterized")?;
             renderer
@@ -328,6 +384,7 @@ impl ClusterRenderer {
             context,
             texture,
             circle,
+            square,
             icon_colors,
             icons: [unfocused?, focused?],
         });

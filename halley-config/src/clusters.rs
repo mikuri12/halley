@@ -75,8 +75,29 @@ pub struct Clusters {
     pub join_distance_px: f32,
     pub show_icons: bool,
     pub bloom_direction: ClusterBloomDirection,
+    /// Shape of the cluster core marker on the Field: the historical
+    /// circle or a square matching `node.shape "square"`.
+    pub core_shape: ClusterCoreShape,
     pub tiling: ClusterTiling,
     pub stacking: ClusterStacking,
+}
+
+/// Shape of a cluster's core landmark.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ClusterCoreShape {
+    #[default]
+    Circle,
+    Square,
+}
+
+impl ClusterCoreShape {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "circle" => Some(Self::Circle),
+            "square" => Some(Self::Square),
+            _ => None,
+        }
+    }
 }
 
 impl Default for Clusters {
@@ -87,6 +108,7 @@ impl Default for Clusters {
             join_distance_px: 280.0,
             show_icons: true,
             bloom_direction: ClusterBloomDirection::Clockwise,
+            core_shape: ClusterCoreShape::default(),
             tiling: ClusterTiling::default(),
             stacking: ClusterStacking::default(),
         }
@@ -110,9 +132,13 @@ pub fn parse_clusters(config: &RuneConfig) -> Clusters {
     let bloom_direction = optional::<String>(config, &["clusters.bloom-direction"])
         .and_then(|value| ClusterBloomDirection::parse(&value))
         .unwrap_or(defaults.bloom_direction);
+    let core_shape = optional::<String>(config, &["clusters.core-shape", "clusters.shape"])
+        .and_then(|value| ClusterCoreShape::parse(&value))
+        .unwrap_or(defaults.core_shape);
 
     Clusters {
         default_layout,
+        core_shape,
         join_dwell_ms: optional(
             config,
             &[
