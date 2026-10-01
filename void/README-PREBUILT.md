@@ -71,7 +71,7 @@ de Void no trae `node` y `actions/checkout` no podría ejecutarse.
 El template solo declara lo que xbps no puede deducir del ELF:
 
 ```
-depends="xwayland-satellite dbus seatd"
+depends="dbus seatd"
 ```
 
 Las libs compartidas (wayland, libxkbcommon, libinput, libseat, libudev, libgbm,

@@ -27,7 +27,6 @@
   libdisplay-info,
   pixman,
   pipewire,
-  xwayland-satellite,
 }: let
   smithayHash = "sha256-TV/GTfSvgfVwIFUGoASU7xm38opIBLjLMf1HeNTW07U=";
 in
@@ -93,12 +92,9 @@ in
       ]
     );
 
-    # Put xwayland-satellite on the compositor's PATH: Halley launches it by
-    # name (Command::new("xwayland-satellite")) for X11 app support.
+    # XWayland is native and embedded in 0.8.0: no external
+    # xwayland-satellite is launched by name anymore, so no PATH wrap for it.
     postFixup = ''
-      wrapProgram $out/bin/halley \
-        --prefix PATH : ${lib.makeBinPath [xwayland-satellite]}
-
       # halleyctl, halley-lift and the portal backend also dlopen
       # EGL/GL/wayland. They're safe to wrap with LD_LIBRARY_PATH (they
       # don't spawn games / children of your session).

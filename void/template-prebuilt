@@ -28,7 +28,7 @@ archs="x86_64"
 # (wayland, libinput, libseat, pixman, ...) las detecta xbps-src solo al
 # escanear los binarios y las anade como shlib-requires; declararlas a mano
 # solo sirve para equivocarse de nombre.
-depends="xwayland-satellite dbus seatd"
+depends="dbus seatd"
 short_desc="Spatial Wayland compositor (Mikuri fork, binarios precompilados)"
 maintainer="mikuri12 <https://github.com/mikuri12>"
 license="GPL-3.0-only"

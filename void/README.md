@@ -82,10 +82,12 @@ Option 1 (prebuilt) pulls **none** of them.
 
 Declared explicitly via `depends=`:
 
-- `xwayland-satellite` — Halley launches it by name for X11 app support.
 - `dbus` — provides `dbus-run-session`, used by the `halley-session` guard.
 - `seatd` — libseat backend for DRM VT handover. Make sure your user is
   in the `_seatd` group (or that the `seatd` runit service is enabled).
+
+X11 apps run through Halley's native embedded XWayland (0.8.0), so
+`xwayland-satellite` is no longer pulled in.
 
 The shared libraries (wayland, libxkbcommon, libinput, libseat, libudev,
 libgbm, libdrm, libglvnd, pixman, pipewire) are *not* listed by hand:
