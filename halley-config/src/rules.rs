@@ -83,8 +83,8 @@ pub struct WindowRule {
 pub struct WindowDecorationTheme {
     pub border_size_px: Option<i32>,
     pub border_radius_px: Option<i32>,
-    pub border_color_focused: Option<halley_config::BorderColor>,
-    pub border_color_unfocused: Option<halley_config::BorderColor>,
+    pub border_color_focused: Option<crate::BorderColor>,
+    pub border_color_unfocused: Option<crate::BorderColor>,
     pub secondary_border: Option<SecondaryBorderTheme>,
 }
 
@@ -94,8 +94,8 @@ pub struct SecondaryBorderTheme {
     pub enabled: Option<bool>,
     pub size_px: Option<i32>,
     pub gap_px: Option<i32>,
-    pub color_focused: Option<halley_config::BorderColor>,
-    pub color_unfocused: Option<halley_config::BorderColor>,
+    pub color_focused: Option<crate::BorderColor>,
+    pub color_unfocused: Option<crate::BorderColor>,
 }
 
 /// One protocol layer that a layer-shell rule may match.
@@ -453,9 +453,9 @@ fn parse_secondary_border_theme(
 }
 
 /// Parses a `#rrggbb` string into a BorderColor.
-fn border_color(value: &Value, name: &str) -> Result<halley_config::BorderColor, WindowRuleParseError> {
+fn border_color(value: &Value, name: &str) -> Result<crate::BorderColor, WindowRuleParseError> {
     let text = string(value, name)?;
-    let parsed = halley_config::BorderColor::parse_hex(&text).ok_or_else(|| {
+    let parsed = crate::BorderColor::parse_hex(&text).ok_or_else(|| {
         WindowRuleParseError(format!(
             "{name} must be \"#rrggbb\", got {text:?}"
         ))

@@ -204,7 +204,7 @@ pub struct FullscreenAnimation {
 }
 
 /// Fullscreen presentation policy.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Fullscreen {
     pub animation: FullscreenAnimation,
     /// Keep anchored, exclusive-zone Top layer-shell surfaces (status bars
