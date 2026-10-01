@@ -19,7 +19,7 @@ pub enum ToplevelCommit {
     Layer,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct ToplevelCommitContext<'a> {
     pub cameras: &'a OutputCameras,
     pub primary_output: &'a Output,

@@ -78,7 +78,7 @@ impl WindowRulesState {
     pub fn track_window(&mut self, window: &Window) -> ResolvedWindowRule {
         let resolved = self.resolve_identity(&identity(window));
         if let Some(surface) = window.wl_surface().map(|surface| surface.into_owned()) {
-            self.applied.insert(surface, resolved);
+            self.applied.insert(surface, resolved.clone());
         }
         resolved
     }
@@ -146,6 +146,7 @@ mod tests {
                 blur: Some(true),
                 spawn_placement: WindowSpawnPlacement::Center,
                 cluster_participation: WindowClusterParticipation::Float,
+                decoration: None,
             },
             WindowRule {
                 app_ids: vec![WindowRulePattern::Exact("app".to_string())],
@@ -155,6 +156,7 @@ mod tests {
                 blur: Some(false),
                 spawn_placement: WindowSpawnPlacement::Cursor,
                 cluster_participation: WindowClusterParticipation::Layout,
+                decoration: None,
             },
         ]);
         let resolved = state.resolve_identity(&WindowIdentity {

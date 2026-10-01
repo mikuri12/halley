@@ -302,7 +302,7 @@ impl<D: SessionDriver> CompositorHandler for Session<D> {
             wayland::xdg_shell::ToplevelCommitContext {
                 cameras: &self.cameras,
                 primary_output: &primary_output,
-                rule,
+                rule: rule.clone(),
                 cursor_position: smithay::utils::Point::from(self.pointer.position()),
                 gap: self.settings.field.gap,
                 decorations: &self.settings.decorations,
