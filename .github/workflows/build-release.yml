@@ -98,7 +98,13 @@ jobs:
           CHECKSUM=$(sha256sum "$TARBALL" | cut -d' ' -f1)
           # version= se deriva del tag (v0.5.4 -> 0.5.4): sin esto el paquete
           # se construiria siempre con la version hardcodeada del template.
+          # xbps-src NO acepta '-' ni '_' en version: los sufijos del fork
+          # estilo "0.8.0-mikuri.1" se traducen a "0.8.0.1".
           VERSION="${GITHUB_REF_NAME#v}"
+          case "$VERSION" in
+            *-mikuri.*) VERSION="${VERSION%%-*}.${VERSION##*.}" ;;
+          esac
+          echo "xbps version: $VERSION"
           sed -e "s|@TAG@|${TAG}|g" -e "s|@CHECKSUM@|${CHECKSUM}|g" \
             -e "s|@VERSION@|${VERSION}|g" \
             void/template-prebuilt > template
