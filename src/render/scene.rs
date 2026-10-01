@@ -833,6 +833,7 @@ pub fn build(
         maximize: request.desktop.maximize,
         window_rules: request.desktop.window_rules,
         cluster_presentation_override: None,
+        precomputed_exclusive: cluster_exclusive,
         instance_identity: None,
         titlebar_hovered: request.desktop.titlebar_hovered,
         titlebar_pressed: request.desktop.titlebar_pressed,

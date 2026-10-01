@@ -59,6 +59,9 @@ pub(super) struct LiveWindowContext<'a> {
     pub(super) maximize: &'a crate::presentation::maximize::FieldMaximizeManager,
     pub(super) window_rules: &'a crate::window::rules::WindowRulesState,
     pub(super) cluster_presentation_override: Option<crate::clusters::WindowPresentation>,
+    /// Cluster-exclusive presentation precomputed once per output frame by
+    /// the scene builder; spares every window its own member walk.
+    pub(super) precomputed_exclusive: Option<crate::presentation::window::ClusterExclusivePresentation>,
     pub(super) instance_identity: Option<&'static str>,
     pub(super) titlebar_hovered: Option<&'a crate::titlebar::ButtonTarget>,
     pub(super) titlebar_pressed: Option<&'a crate::titlebar::ButtonTarget>,
@@ -304,6 +307,7 @@ pub(super) fn live_window_elements(
         context.font,
         context.target_presentation_time,
         context.cluster_presentation_override,
+        context.precomputed_exclusive,
     ) else {
         return Ok(LiveWindowScene {
             popup_elements: Vec::new(),

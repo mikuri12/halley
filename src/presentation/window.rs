@@ -188,6 +188,7 @@ pub(crate) fn window_visual_state(
         font,
         now,
         None,
+        None,
     )
 }
 
@@ -206,6 +207,7 @@ pub(crate) fn window_visual_state_with_cluster_presentation(
     font: &halley_config::Font,
     now: std::time::Duration,
     cluster_override: Option<crate::clusters::WindowPresentation>,
+    precomputed_exclusive: Option<ClusterExclusivePresentation>,
 ) -> Option<WindowVisualState> {
     let output_geometry = space.output_geometry(output)?;
     let output_size = output_geometry.size.to_physical(1);
@@ -214,16 +216,22 @@ pub(crate) fn window_visual_state_with_cluster_presentation(
     let source_geometry = space.element_geometry(window)?;
     let window_surface = window.wl_surface()?;
     let window_node = nodes.and_then(|nodes| nodes.id_for_surface(window_surface.as_ref()));
-    let exclusive_presentation = clusters.zip(nodes).and_then(|(clusters, nodes)| {
-        cluster_exclusive_presentation(
-            clusters,
-            nodes,
-            fullscreen,
-            maximize,
-            output,
-            output_geometry,
-            now,
-        )
+    // The cluster-exclusive presentation depends only on (output, now), not
+    // on the window: when the scene builder already computed it for this
+    // frame, reuse it instead of walking every cluster member again for each
+    // window (O(windows x members) per frame otherwise).
+    let exclusive_presentation = precomputed_exclusive.or_else(|| {
+        clusters.zip(nodes).and_then(|(clusters, nodes)| {
+            cluster_exclusive_presentation(
+                clusters,
+                nodes,
+                fullscreen,
+                maximize,
+                output,
+                output_geometry,
+                now,
+            )
+        })
     });
     let cluster_exclusive = is_cluster_exclusive_window(
         window_node,
