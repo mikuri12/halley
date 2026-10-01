@@ -34,7 +34,8 @@ jobs:
             libwayland-dev libxkbcommon-dev \
             libinput-dev libseat-dev libudev-dev \
             libgbm-dev libdrm-dev libglvnd-dev \
-            libpixman-1-dev libdbus-1-dev libpipewire-0.3-dev
+            libpixman-1-dev libdbus-1-dev libpipewire-0.3-dev \
+            libdisplay-info-dev libseat-dev
 
       - name: Cache cargo registry
         uses: actions/cache@v4
