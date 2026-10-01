@@ -1176,11 +1176,8 @@ fn fitted_title(
     // recent frame. The UiTextRenderer texture cache keeps the measurement
     // alive; this skips the whole binary search for unchanged titles.
     let cache_key = fitted_title_cache_key(title, max_width, scale);
-    if let Some(hit) = ui_text.fitted_title_cache_get(&cache_key) {
-        return Ok(Some(FittedTitle {
-            text: hit.text.clone(),
-            size: hit.size,
-        }));
+    if let Some(cached) = ui_text.fitted_title_cache_get(&cache_key) {
+        return Ok(cached.map(|(text, size)| FittedTitle { text, size }));
     }
     let mut measure =
         |ui_text: &mut crate::render::text::UiTextRenderer, text: &str| match text_size_px {
@@ -1196,8 +1193,7 @@ fn fitted_title(
         };
         ui_text.fitted_title_cache_put(
             cache_key,
-            Some(fitted.text.clone()),
-            Some(fitted.size),
+            Some((fitted.text.clone(), fitted.size)),
         );
         return Ok(Some(fitted));
     }
@@ -1228,15 +1224,12 @@ fn fitted_title(
         }
     }
     if let Some(best) = best.as_ref() {
-        ui_text.fitted_title_cache_put(
-            cache_key,
-            Some(best.text.clone()),
-            Some(best.size),
-        );
+        ui_text
+            .fitted_title_cache_put(cache_key, Some((best.text.clone(), best.size)));
     } else {
         // Nothing fit (empty title after ellipsis): cache the miss too so a
         // pathological width does not re-run the search every frame.
-        ui_text.fitted_title_cache_put(cache_key, None, None);
+        ui_text.fitted_title_cache_put(cache_key, None);
     }
     Ok(best)
 }

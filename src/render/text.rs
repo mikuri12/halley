@@ -76,11 +76,12 @@ fn text_key_hash(key: &TextKey) -> u64 {
     hasher.finish()
 }
 
-/// A fitted-title cache entry: the ellipsized text plus its measured size.
+/// A fitted-title cache entry: the ellipsized text plus its measured size,
+/// or `None` when nothing fit at the requested width. The timestamp keeps
+/// the same TTL sweep as the texture cache.
 pub struct FittedTitleEntry {
-    pub text: String,
-    pub size: smithay::utils::Size<i32, smithay::utils::Physical>,
     last_used: Instant,
+    fitted: Option<(String, smithay::utils::Size<i32, smithay::utils::Physical>)>,
 }
 
 impl Default for UiTextRenderer {
@@ -152,33 +153,31 @@ impl UiTextRenderer {
 
     /// Look up a previously fitted title for this raw title at this exact
     /// max-width/scale. Called by the titlebar scene builder before it
-    /// re-runs the ellipsis binary search.
+    /// re-runs the ellipsis binary search. Returns `None` on a miss and
+    /// `Some(None)` when the miss outcome itself was cached (nothing fit).
     pub fn fitted_title_cache_get(
         &mut self,
         key: &(String, i32, u32),
-    ) -> Option<&FittedTitleEntry> {
+    ) -> Option<Option<(String, smithay::utils::Size<i32, smithay::utils::Physical>)>> {
         let entry = self.fitted_titles.get_mut(key)?;
         entry.last_used = Instant::now();
-        Some(entry)
+        entry.fitted.clone()
     }
 
-    /// Store a fitted-title result (including a "did not fit, ellipsized"
-    /// outcome) so later frames with the same constraints skip the search.
+    /// Store a fitted-title result (including a "did not fit" outcome) so
+    /// later frames with the same constraints skip the search.
     pub fn fitted_title_cache_put(
         &mut self,
         key: (String, i32, u32),
-        text: Option<String>,
-        size: Option<smithay::utils::Size<i32, smithay::utils::Physical>>,
+        fitted: Option<(String, smithay::utils::Size<i32, smithay::utils::Physical>)>,
     ) {
-        let value = match (text, size) {
-            (Some(text), Some(size)) => Some(FittedTitleEntry {
-                text,
-                size,
+        self.fitted_titles.insert(
+            key,
+            FittedTitleEntry {
                 last_used: Instant::now(),
-            }),
-            _ => None,
-        };
-        self.fitted_titles.insert(key, value);
+                fitted,
+            },
+        );
     }
 
     fn measure_with_size(

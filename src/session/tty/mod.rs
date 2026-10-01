@@ -38,6 +38,7 @@ use crate::wayland;
 
 use self::frame::{EstimatedVblankTimer, OutputFrameState, VblankAction};
 use super::RenderDriver as _;
+use super::SessionDriver as _;
 
 struct TtyDriver {
     backend: TtyBackend,
