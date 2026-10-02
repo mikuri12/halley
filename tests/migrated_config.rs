@@ -25,7 +25,7 @@ fn migrated_user_config_parses_with_strict_runtime_parser() {
                 halley_config::ClusterCoreShape::Square
             );
             assert_eq!(config.nodes.shape, halley_config::NodeShape::Square);
-            assert!(!config.effects.blur.enabled);
+            assert!(!config.effects.blur.overlays);
             assert!(
                 config
                     .keybinds

@@ -268,8 +268,15 @@ animations:
 end
 
 effects:
+  # 0.8 no tiene switch global de blur: se activa SOLO via rules.window-rule/
+  # layer-rule blur. Sin reglas, no hay blur (como queria el enabled false).
+  # Ajustes de calidad para cuando una regla lo encienda:
   blur:
-    enabled false
+    overlays false
+    radius 24
+    passes 3
+    saturation 1.10
+    noise 0.012
   end
 
   shadows:
