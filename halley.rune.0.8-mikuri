@@ -60,7 +60,7 @@ input:
     pinch-to-zoom true
     pinch-scope "empty-field"
     compositor-scope "global"
-    modifier "$mod"
+    modifier "mod"
     scroll-pan "empty-field"
     swipe-threshold-px 120
     pan-fingers 3
