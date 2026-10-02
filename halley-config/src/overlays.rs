@@ -130,12 +130,11 @@ impl Default for Overlays {
                 b: 0x34 as f32 / 255.0,
                 a: 1.0,
             },
-            border_color: OverlayColorMode::Fixed {
-                r: 0xd6 as f32 / 255.0,
-                g: 0x5d as f32 / 255.0,
-                b: 0x26 as f32 / 255.0,
-                a: 1.0,
-            },
+            // Auto derives the border from the fill palette. The old #d65d26
+            // brand accent read as stray orange dots around the Field
+            // (Bearings markers); set an explicit overlays.border-colour of
+            // #d65d26 to bring the old look back.
+            border_color: OverlayColorMode::Auto,
             radius_px: 8,
             borders: true,
             border_size_px: 3,
