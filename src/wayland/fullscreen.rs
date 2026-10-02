@@ -467,6 +467,9 @@ impl FullscreenManager {
             send_required_configure(toplevel);
             return;
         };
+        // Computed before the entry borrow: the work-area lookup only needs
+        // the output and the panel policy, not the per-window state.
+        let fullscreen_target_size = self.fullscreen_target_size(&target, output_geometry);
 
         let entry = self
             .windows
@@ -518,7 +521,6 @@ impl FullscreenManager {
         // usable work area instead of the whole output: the anchored Top
         // layer-shell bar stays a visible layer above the fullscreen window,
         // niri-style, rather than being covered or leaving a gap.
-        let fullscreen_target_size = self.fullscreen_target_size(&target, output_geometry);
         entry.fullscreen_size = fullscreen_target_size;
         let protocol_origin = native_protocol_origin(entry);
         let protocol_desired = entry.native.is_none_or(|native| native.protocol_desired);
