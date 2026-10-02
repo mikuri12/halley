@@ -187,9 +187,7 @@ impl TitlebarRenderer {
             } else {
                 resolved
             };
-            signature = signature
-                .wrapping_mul(31)
-                .wrapping_add(std::hash::Hash::hash(&resolved));
+            signature = signature.wrapping_mul(31).wrapping_add(path_signature(&resolved));
             match std::fs::read(&resolved) {
                 Ok(bytes) => {
                     sources.insert(icon, bytes);
@@ -210,6 +208,15 @@ impl TitlebarRenderer {
         self.icons.clear();
         true
     }
+}
+
+/// Stable hash of one resolved glyph path, used to detect reloads that did
+/// not actually change the configured files.
+fn path_signature(path: &std::path::Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn raster_mask(source: &[u8]) -> Option<Vec<u8>> {
