@@ -15,6 +15,11 @@ pub struct Cursor {
     pub hide_on_keyboard_nav: bool,
     pub hide_on_touch: bool,
     pub hide_after_ms: Option<u32>,
+    /// When false, multi-frame (animated) cursor themes render their first
+    /// frame only. Each animation frame schedules a full output redraw on a
+    /// timer, so animated cursors cost CPU even while the pointer is at rest;
+    /// static cursors redraw only on real pointer motion.
+    pub animated: bool,
 }
 
 impl Default for Cursor {
@@ -26,6 +31,7 @@ impl Default for Cursor {
             hide_on_keyboard_nav: true,
             hide_on_touch: true,
             hide_after_ms: Some(DEFAULT_HIDE_AFTER_MS),
+            animated: true,
         }
     }
 }
@@ -60,6 +66,7 @@ pub fn parse_cursor(config: &RuneConfig) -> Cursor {
             .get_or("cursor.hide-on-keyboard-nav", defaults.hide_on_keyboard_nav),
         hide_on_touch: config.get_or("cursor.hide-on-touch", defaults.hide_on_touch),
         hide_after_ms,
+        animated: config.get_or("cursor.animated", defaults.animated),
     }
 }
 

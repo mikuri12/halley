@@ -98,6 +98,9 @@ pub struct CursorManager {
     theme: CursorTheme,
     default_theme: CursorTheme,
     size: u8,
+    /// False pins multi-frame themes to their first frame and stops the
+    /// per-frame animation redraw timer (see `Cursor::animated`).
+    animated: bool,
     image: CursorImageStatus,
     overrides: CursorOverrides,
     cache: RefCell<HashMap<(CursorIcon, i32), Rc<PreparedCursor>>>,
@@ -111,6 +114,7 @@ impl CursorManager {
             theme: CursorTheme::load(&config.theme),
             default_theme: CursorTheme::load("default"),
             size: config.size,
+            animated: config.animated,
             image: CursorImageStatus::default_named(),
             overrides: CursorOverrides::default(),
             cache: RefCell::new(HashMap::new()),
@@ -119,13 +123,17 @@ impl CursorManager {
     }
 
     pub fn reload(&mut self, config: &halley_config::Cursor) -> bool {
-        if self.theme_name == config.theme && self.size == config.size {
+        if self.theme_name == config.theme
+            && self.size == config.size
+            && self.animated == config.animated
+        {
             return false;
         }
         self.theme_name.clone_from(&config.theme);
         self.theme = CursorTheme::load(&config.theme);
         self.default_theme = CursorTheme::load("default");
         self.size = config.size;
+        self.animated = config.animated;
         self.cache.get_mut().clear();
         true
     }
@@ -139,7 +147,7 @@ impl CursorManager {
     }
 
     pub fn is_animated(&self, icon: CursorIcon, output_scale: i32) -> bool {
-        self.prepared(icon, output_scale).is_animated()
+        self.animated && self.prepared(icon, output_scale).is_animated()
     }
 
     pub fn next_frame_in(
@@ -148,6 +156,9 @@ impl CursorManager {
         output_scale: i32,
         time: Duration,
     ) -> Option<Duration> {
+        if !self.animated {
+            return None;
+        }
         self.prepared(icon, output_scale).next_frame_in(time)
     }
 

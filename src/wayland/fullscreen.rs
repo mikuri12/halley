@@ -571,17 +571,17 @@ impl FullscreenManager {
                     )
                 })
             });
-        if let Some((target_output, fullscreen_size, origin, protocol_desired)) = nested {
-            let bounds = output_by_name(wayland, &target_output)
-                .and_then(|output| wayland.space.output_geometry(&output))
-                .map_or(fullscreen_size, |geometry| geometry.size);
+        if let Some((_target_output, fullscreen_size, origin, protocol_desired)) = nested {
+            // The entry's fullscreen_size is already the panel-aware
+            // destination; recomputing it from the raw output geometry would
+            // resize past a preserved panel.
             toplevel.with_pending_state(|state| {
                 apply_protocol_presentation_state(state, origin, protocol_desired);
                 // Mod+F still owns the visual output presentation. Keep the
                 // configured size pinned while releasing the nested client
                 // owner.
-                state.size = Some(bounds);
-                state.bounds = Some(bounds);
+                state.size = Some(fullscreen_size);
+                state.bounds = Some(fullscreen_size);
                 state.fullscreen_output = None;
                 super::decoration::clear_tiled_hint(state);
             });
@@ -711,15 +711,17 @@ impl FullscreenManager {
         let window = find_window(wayland, &wl_surface).cloned()?;
         let target = super::window_output_name(&window)
             .and_then(|name| output_by_name(wayland, &name))
-            .or_else(|| super::focus::selected_output(wayland).cloned());
-        let target = target?;
+            .or_else(|| super::focus::selected_output(wayland).cloned())?;
         let output_geometry = wayland.space.output_geometry(&target)?;
+        // X11/EWMH fullscreen follows the same panel-aware destination as
+        // native requests: the work area when panels are preserved.
+        let external_target_size = self.fullscreen_target_size(&target, output_geometry);
         let target_name = target.name();
         self.windows
             .entry(wl_surface)
             .and_modify(|entry| {
                 entry.origin = origin;
-                settle_external_fullscreen(entry, &target_name, output_geometry.size);
+                settle_external_fullscreen(entry, &target_name, external_target_size);
             })
             .or_insert_with(|| FullscreenWindow {
                 desired: true,
@@ -740,7 +742,7 @@ impl FullscreenManager {
                 presentation_windowed: None,
                 presentation_output: None,
                 restore_presentation_output: None,
-                fullscreen_size: output_geometry.size,
+                fullscreen_size: external_target_size,
                 transition: None,
                 pending_motion: (0.0, 0.0),
                 external_pending: None,
@@ -826,6 +828,11 @@ impl FullscreenManager {
             .and_then(|name| output_by_name(wayland, &name))
             .or_else(|| super::focus::selected_output(wayland).cloned())?;
         let output_geometry = wayland.space.output_geometry(&target)?;
+        // Panel-aware destination for the animated/opening external
+        // transaction paths (X11 apps entering fullscreen with a transition).
+        let external_target_size = self.fullscreen_target_size(&target, output_geometry);
+        let external_target_geometry =
+            Rectangle::new(output_geometry.loc, external_target_size);
         let target_name = target.name();
         let current_restore =
             wayland
@@ -860,7 +867,7 @@ impl FullscreenManager {
                 presentation_windowed: None,
                 presentation_output: None,
                 restore_presentation_output: None,
-                fullscreen_size: output_geometry.size,
+                fullscreen_size: external_target_size,
                 transition: None,
                 pending_motion: (0.0, 0.0),
                 external_pending: None,
@@ -873,7 +880,7 @@ impl FullscreenManager {
             });
         entry.origin = origin;
         entry.target_output = target_name;
-        entry.fullscreen_size = output_geometry.size;
+        entry.fullscreen_size = external_target_size;
         if entry.restore.is_none() {
             entry.restore = restore;
         }
@@ -881,7 +888,7 @@ impl FullscreenManager {
         Some(begin_external_transaction(
             entry,
             true,
-            output_geometry,
+            external_target_geometry,
             presentation,
             crate::frame_clock::monotonic_now(),
         ))

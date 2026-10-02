@@ -24,6 +24,10 @@ end
 cursor:
   theme "MikuCat"
   size 22
+  # Cursor animado OFF: cada frame del tema animado programa un redraw
+  # completo del output (CPU alto al mover/idle). Estatico = redraw solo
+  # con movimiento real del puntero.
+  animated false
   hide-when-typing true
   hide-after-ms 2000
 end
