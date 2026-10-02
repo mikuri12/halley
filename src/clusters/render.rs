@@ -142,6 +142,7 @@ impl ClusterRenderer {
         fill_rgb: (f32, f32, f32),
         opacity: f32,
         alpha: f32,
+        shape: halley_config::ClusterCoreShape,
     ) -> Result<ClusterCoreElement, Box<dyn Error>> {
         self.core_element(
             renderer,
@@ -150,7 +151,7 @@ impl ClusterRenderer {
             fill_rgb,
             opacity,
             alpha,
-            halley_config::ClusterCoreShape::Circle,
+            shape,
         )
     }
 

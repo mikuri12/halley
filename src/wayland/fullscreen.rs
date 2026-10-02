@@ -238,6 +238,26 @@ impl FullscreenManager {
         self.policy.preserve_top_panels
     }
 
+    /// The fullscreen destination size for one output: the usable work area
+    /// when panels are preserved, the whole output otherwise. The work-area
+    /// rect is what the client gets configured to and what the presentation
+    /// animates toward, so the visible window stops exactly at the bar's edge
+    /// instead of sliding underneath it or leaving a gap.
+    fn fullscreen_target_size(
+        &self,
+        output: &Output,
+        output_geometry: Rectangle<i32, Logical>,
+    ) -> Size<i32, Logical> {
+        if !self.policy.preserve_top_panels {
+            return output_geometry.size;
+        }
+        let work_area = smithay::desktop::layer_map_for_output(output).non_exclusive_zone();
+        if work_area.size.w <= 0 || work_area.size.h <= 0 {
+            return output_geometry.size;
+        }
+        work_area.size
+    }
+
     /// Parks a fullscreen presentation when explicit navigation selects a
     /// different window on the same output. Protocol fullscreen and client
     /// geometry remain intact; only output-camera and top-layer ownership are
@@ -494,7 +514,12 @@ impl FullscreenManager {
         // here, exactly like field maximize decides its target rect at toggle
         // time. `handle_commit` only re-reads the client's committed size once
         // the transition has settled, to letterbox a client that stays smaller.
-        entry.fullscreen_size = output_geometry.size;
+        // With preserve-top-panels, the fullscreen destination is the output's
+        // usable work area instead of the whole output: the anchored Top
+        // layer-shell bar stays a visible layer above the fullscreen window,
+        // niri-style, rather than being covered or leaving a gap.
+        let fullscreen_target_size = self.fullscreen_target_size(&target, output_geometry);
+        entry.fullscreen_size = fullscreen_target_size;
         let protocol_origin = native_protocol_origin(entry);
         let protocol_desired = entry.native.is_none_or(|native| native.protocol_desired);
         let keep_maximized_protocol =
@@ -508,8 +533,8 @@ impl FullscreenManager {
                 keep_maximized_protocol,
             );
             super::decoration::clear_tiled_hint(state);
-            state.size = Some(output_geometry.size);
-            state.bounds = Some(output_geometry.size);
+            state.size = Some(fullscreen_target_size);
+            state.bounds = Some(fullscreen_target_size);
             state.fullscreen_output = (protocol_origin != FullscreenOrigin::Maximize
                 && protocol_desired)
                 .then_some(requested)

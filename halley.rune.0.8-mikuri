@@ -101,18 +101,19 @@ apogee:
 end
 
 view:
-  output "HDMI-A-1":
-    enabled true
+  # Sintaxis 0.8: output anidado con campo name (no nombre en linea).
+  output:
+    name "HDMI-A-1"
     width 1366
     height 768
     rate 60.000
-    transform "normal"
+    transform 0
     vrr "off"
     focus-ring:
-      primary-rx 820.0
-      primary-ry 420.0
-      offset-x 0
-      offset-y 0
+      radius-x 820.0
+      radius-y 420.0
+      offset-x 0.0
+      offset-y 0.0
     end
   end
 end
@@ -140,8 +141,6 @@ field:
     enabled true
     step 1.10
     min 0.35
-    max 1.35
-    smooth true
     smooth-rate 12.5
   end
 end
@@ -150,15 +149,17 @@ node:
   show-labels "hover"
   show-app-icons "always"
 
-  node-shape "square"
-  node-label-shape "square"
+  # 0.8: shape / label-shape (antes node-shape / node-label-shape).
+  shape "square"
+  label-shape "square"
 
   icon-size 0.72
   opacity 1.0
   background-colour "auto"
 
-  border-colour-hover "use-window-active"
-  border-colour-inactive "use-window-inactive"
+  # 0.8: border-colour / border-colour-highlighted.
+  border-colour "#a68866"
+  border-colour-highlighted "#d65d26"
 
   click-collapsed-pan "if-offscreen"
 end
@@ -283,7 +284,7 @@ effects:
 
     node:
       enabled true
-      blur-radius 22
+      blur-radius 12
       spread 3
       offset-x 0
       offset-y 8
@@ -292,7 +293,7 @@ effects:
 
     overlay:
       enabled true
-      blur-radius 30
+      blur-radius 18
       spread 4
       offset-x 0
       offset-y 10

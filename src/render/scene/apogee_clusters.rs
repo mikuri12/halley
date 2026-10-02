@@ -133,9 +133,15 @@ pub(super) fn apogee_core_tile_elements(
             )?,
         ));
     }
-    elements.push(SceneElement::ClusterCore(
-        cluster_renderer.core_with_alpha(renderer, body, ring, fill, nodes.config.opacity, 1.0)?,
-    ));
+    elements.push(SceneElement::ClusterCore(cluster_renderer.core_with_alpha(
+        renderer,
+        body,
+        ring,
+        fill,
+        nodes.config.opacity,
+        1.0,
+        clusters.config().core_shape,
+    )?));
     Ok(elements)
 }
 

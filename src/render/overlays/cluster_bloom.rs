@@ -72,6 +72,7 @@ pub(crate) fn elements(
                 fill,
                 nodes.config.opacity,
                 token.alpha,
+                clusters.config().core_shape,
             )?,
         ));
 

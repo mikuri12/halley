@@ -273,6 +273,7 @@ pub(super) fn prepared_core_elements(
             visual.fill,
             node_config.opacity,
             alpha,
+            cluster_config.core_shape,
         )?,
     ));
     Ok(elements)
