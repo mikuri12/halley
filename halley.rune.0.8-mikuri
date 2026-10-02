@@ -329,6 +329,25 @@ decorations:
     colour-unfocused "#181410"
   end
 
+  titlebars:
+    # La barra de titulo usa el color del borde de la ventana (focused/
+    # unfocused): marco + decoracion leen como una sola pieza cubierta
+    # por ambos bordes.
+    follow-border true
+
+    # SVGs propios para los botones (rutas absolutas o relativas a este
+    # archivo). Descomenta los que quieras reemplazar:
+    # icon-close "~/.config/halley/icons/close.svg"
+    # icon-minimize "~/.config/halley/icons/minimize.svg"
+    # icon-maximize "~/.config/halley/icons/maximize.svg"
+    # icon-unmaximize "~/.config/halley/icons/unmaximize.svg"
+
+    # Tints fijos por boton (hex). Sin estos, usan el color del estado:
+    # icon-close-colour "#fb4934"
+    # icon-minimize-colour "#fabd2f"
+    # icon-maximize-colour "#8fa8d8"
+  end
+
   resize-using-border true
 end
 

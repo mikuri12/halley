@@ -41,6 +41,12 @@ impl Icon {
 pub struct TitlebarRenderer {
     context: Option<ContextId<GlesTexture>>,
     icons: HashMap<Icon, WindowTexture>,
+    /// Configured custom glyph sources; when set, these replace the bundled
+    /// bytes at prepare time.
+    custom_sources: HashMap<Icon, Vec<u8>>,
+    /// Stable signature of the loaded customization, so a config reload with
+    /// the same paths does not rebuild textures.
+    custom_signature: u64,
     failed: bool,
 }
 
@@ -96,19 +102,40 @@ impl TitlebarRenderer {
 
     fn ensure(&mut self, renderer: &mut GlesRenderer) -> Result<(), Box<dyn Error>> {
         let context = renderer.context_id();
-        if self.context.as_ref() == Some(&context) && self.icons.len() == 4 {
+        if self.context.as_ref() == Some(&context)
+            && self.icons.len() == 4
+            && !self.custom_sources.is_empty()
+        {
+            return Ok(());
+        }
+        if self.context.as_ref() == Some(&context) && self.icons.len() == 4 && self.custom_sources.is_empty() {
             return Ok(());
         }
         self.context = Some(context.clone());
         self.icons.clear();
         self.failed = false;
-        for (icon, source) in [
+        for (icon, bundled) in [
             (Icon::Close, CLOSE),
             (Icon::Minimize, MINIMIZE),
             (Icon::Maximize, MAXIMIZE),
             (Icon::Unmaximize, UNMAXIMIZE),
         ] {
-            let pixels = raster_mask(source).ok_or("bundled SVG did not produce an alpha mask")?;
+            // A configured custom glyph wins over the bundled artwork;
+            // unreadable files fall back to the bundled mask with a warning.
+            let source: &[u8] = match self.custom_sources.get(&icon) {
+                Some(bytes) => bytes,
+                None => bundled,
+            };
+            let pixels = match raster_mask(source) {
+                Some(pixels) => pixels,
+                None if self.custom_sources.contains_key(&icon) => {
+                    eventline::warn!(
+                        "titlebars: custom glyph could not be rasterized; using the bundled mask"
+                    );
+                    raster_mask(bundled).ok_or("bundled SVG did not produce an alpha mask")?
+                }
+                None => return Err("bundled SVG did not produce an alpha mask".into()),
+            };
             let texture = renderer.import_memory(
                 &pixels,
                 Fourcc::Abgr8888,
@@ -124,6 +151,64 @@ impl TitlebarRenderer {
             );
         }
         Ok(())
+    }
+
+    /// Applies custom glyph files from the titlebar configuration. Relative
+    /// paths resolve against `base_dir` (the configuration file's
+    /// directory). Returns `true` when the glyph set changed and the
+    /// textures must be rebuilt; callers schedule a redraw.
+    pub fn reload_custom_icons(
+        &mut self,
+        config: &halley_config::TitlebarIconPaths,
+        base_dir: Option<&std::path::Path>,
+    ) -> bool {
+        let mut sources = HashMap::new();
+        let mut signature = 0u64;
+        for (icon, path) in [
+            (Icon::Close, config.close.as_ref()),
+            (Icon::Minimize, config.minimize.as_ref()),
+            (Icon::Maximize, config.maximize.as_ref()),
+            (Icon::Unmaximize, config.unmaximize.as_ref()),
+        ] {
+            let Some(path) = path else {
+                continue;
+            };
+            let resolved = match base_dir {
+                Some(dir) if path.is_relative() => dir.join(path),
+                _ => path.clone(),
+            };
+            // Expand a leading `~` to $HOME like the screenshot directory.
+            let resolved = if let Some(rest) = resolved
+                .to_str()
+                .and_then(|text| text.strip_prefix("~/"))
+            {
+                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                std::path::PathBuf::from(home).join(rest)
+            } else {
+                resolved
+            };
+            signature = signature
+                .wrapping_mul(31)
+                .wrapping_add(std::hash::Hash::hash(&resolved));
+            match std::fs::read(&resolved) {
+                Ok(bytes) => {
+                    sources.insert(icon, bytes);
+                }
+                Err(err) => {
+                    eventline::warn!(
+                        "titlebars: could not read custom glyph {resolved:?}: {err}"
+                    );
+                }
+            }
+        }
+        if signature == self.custom_signature {
+            return false;
+        }
+        self.custom_signature = signature;
+        self.custom_sources = sources;
+        // Force the next ensure() to rebuild textures from the new sources.
+        self.icons.clear();
+        true
     }
 }
 

@@ -539,6 +539,16 @@ impl<D: SessionDriver> Session<D> {
         let fullscreen_policy_changed = self.fullscreen.reload_policy(config.fullscreen);
         let font_redraw = self.render.ui_text.reload_font(&config.font);
         self.settings.reload_non_input(config);
+        // Custom titlebar glyphs: load configured SVG files, resolving
+        // relative paths against the configuration file's directory.
+        let base_dir = self
+            .config_path
+            .as_deref()
+            .and_then(std::path::Path::parent);
+        let custom_icons_changed = self
+            .render
+            .titlebar_renderer
+            .reload_custom_icons(&config.decorations.titlebars.icon_paths, base_dir);
         if decorations_changed {
             // A changed border width or titlebar height resizes the frame
             // every X11 client computes its root coordinates against.
@@ -579,6 +589,7 @@ impl<D: SessionDriver> Session<D> {
             || fullscreen_redraw
             || maximize_redraw
             || fullscreen_policy_changed
+            || custom_icons_changed
         {
             self.request_redraw();
         }

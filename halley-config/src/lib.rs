@@ -52,7 +52,7 @@ pub use clusters::{
 pub use cursor::{Cursor, parse_cursor};
 pub use decorations::{
     BorderColor, Decorations, SecondaryBorder, TitlebarButtonPosition, TitlebarContentPosition,
-    Titlebars, load_decorations, parse_decorations,
+    TitlebarIconColors, TitlebarIconPaths, Titlebars, load_decorations, parse_decorations,
 };
 pub use diagnostic::ConfigDiagnostic;
 pub use effects::{

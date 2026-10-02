@@ -1051,7 +1051,13 @@ pub(crate) fn append_titlebar_elements(
     if reserve_pin_badge {
         layout.reserve_opposite_controls(config.button_position);
     }
-    let background = if focused {
+    let background = if config.follow_border {
+        if focused {
+            decorations.border_color_focused
+        } else {
+            decorations.border_color_unfocused
+        }
+    } else if focused {
         config.color_focused
     } else {
         config.color_unfocused
@@ -1076,6 +1082,21 @@ pub(crate) fn append_titlebar_elements(
             config.button_hover_color
         } else {
             foreground
+        };
+        // A per-glyph tint overrides the state color unless the button is
+        // hovered or pressed, so feedback states stay visible.
+        let state_color = if !is_hovered && !is_pressed {
+            let per_glyph = match control.control {
+                crate::titlebar::Control::Close => config.icon_colors.close,
+                crate::titlebar::Control::Minimize => config.icon_colors.minimize,
+                crate::titlebar::Control::Maximize if maximized => {
+                    config.icon_colors.unmaximize
+                }
+                crate::titlebar::Control::Maximize => config.icon_colors.maximize,
+            };
+            per_glyph.unwrap_or(state_color)
+        } else {
+            state_color
         };
         let backplate = if is_hovered || is_pressed {
             let backplate_alpha = if is_pressed { 0.30 } else { 0.18 };

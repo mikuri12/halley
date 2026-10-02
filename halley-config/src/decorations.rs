@@ -46,6 +46,36 @@ pub struct Titlebars {
     pub foreground_color_unfocused: BorderColor,
     pub button_hover_color: BorderColor,
     pub button_pressed_color: BorderColor,
+    /// Optional custom button-glyph SVG paths (close/minimize/maximize/
+    /// unmaximize). Relative paths resolve against the configuration file.
+    /// When a path is set, the bundled glyph is replaced by that file's
+    /// alpha mask and drawn in the runtime button tint.
+    pub icon_paths: TitlebarIconPaths,
+    /// Optional explicit tints for the four button glyphs, overriding the
+    /// state-derived foreground. Unset slots keep the default behavior.
+    pub icon_colors: TitlebarIconColors,
+    /// When true, the titlebar background draws in the window's border
+    /// color (focused/unfocused) instead of its own, so the frame and the
+    /// decoration read as one surface covered by both borders.
+    pub follow_border: bool,
+}
+
+/// Per-glyph custom SVG sources for titlebar buttons.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TitlebarIconPaths {
+    pub close: Option<std::path::PathBuf>,
+    pub minimize: Option<std::path::PathBuf>,
+    pub maximize: Option<std::path::PathBuf>,
+    pub unmaximize: Option<std::path::PathBuf>,
+}
+
+/// Per-glyph explicit tints; `None` keeps the state color.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TitlebarIconColors {
+    pub close: Option<BorderColor>,
+    pub minimize: Option<BorderColor>,
+    pub maximize: Option<BorderColor>,
+    pub unmaximize: Option<BorderColor>,
 }
 
 impl Default for Titlebars {
@@ -90,6 +120,9 @@ impl Default for Titlebars {
                 g: 0x14 as f32 / 255.0,
                 b: 0x18 as f32 / 255.0,
             },
+            icon_paths: TitlebarIconPaths::default(),
+            icon_colors: TitlebarIconColors::default(),
+            follow_border: false,
         }
     }
 }
@@ -296,6 +329,12 @@ pub fn parse_decorations(config: &RuneConfig) -> Decorations {
             ],
             titlebar_defaults.button_pressed_color,
         ),
+        icon_paths: parse_titlebar_icon_paths(config),
+        icon_colors: parse_titlebar_icon_colors(config),
+        follow_border: config.get_or(
+            "decorations.titlebars.follow-border",
+            titlebar_defaults.follow_border,
+        ),
     };
 
     Decorations {
@@ -382,6 +421,67 @@ fn parse_color(config: &RuneConfig, paths: &[&str], default: BorderColor) -> Bor
     parse_hex_rgb(raw.trim())
         .map(|(r, g, b)| BorderColor { r, g, b })
         .unwrap_or(default)
+}
+
+/// Parses `decorations.titlebars.icon-{glyph}` SVG path settings. Relative
+/// paths are stored as given and resolved against the configuration file's
+/// directory when the renderer loads them.
+fn parse_titlebar_icon_paths(config: &RuneConfig) -> TitlebarIconPaths {
+    let slot = |kebab: &str, snake: &str| -> Option<std::path::PathBuf> {
+        config
+            .get_optional::<String>(kebab)
+            .or_else(|_| config.get_optional::<String>(snake))
+            .ok()
+            .flatten()
+            .filter(|raw| !raw.trim().is_empty())
+            .map(std::path::PathBuf::from)
+    };
+    TitlebarIconPaths {
+        close: slot("decorations.titlebars.icon-close", "decorations.titlebars.icon_close"),
+        minimize: slot(
+            "decorations.titlebars.icon-minimize",
+            "decorations.titlebars.icon_minimize",
+        ),
+        maximize: slot(
+            "decorations.titlebars.icon-maximize",
+            "decorations.titlebars.icon_maximize",
+        ),
+        unmaximize: slot(
+            "decorations.titlebars.icon-unmaximize",
+            "decorations.titlebars.icon_unmaximize",
+        ),
+    }
+}
+
+/// Parses `decorations.titlebars.icon-{glyph}-colour` explicit tints. Unset
+/// slots stay `None` and keep the state-derived button foreground.
+fn parse_titlebar_icon_colors(config: &RuneConfig) -> TitlebarIconColors {
+    let slot = |kebab: &str, snake: &str| -> Option<BorderColor> {
+        let raw = config
+            .get_optional::<String>(kebab)
+            .or_else(|_| config.get_optional::<String>(snake))
+            .ok()
+            .flatten()?;
+        parse_hex_rgb(raw.trim()).map(|(r, g, b)| BorderColor { r, g, b })
+    };
+    TitlebarIconColors {
+        close: slot(
+            "decorations.titlebars.icon-close-colour",
+            "decorations.titlebars.icon_close_color",
+        ),
+        minimize: slot(
+            "decorations.titlebars.icon-minimize-colour",
+            "decorations.titlebars.icon_minimize_color",
+        ),
+        maximize: slot(
+            "decorations.titlebars.icon-maximize-colour",
+            "decorations.titlebars.icon_maximize_color",
+        ),
+        unmaximize: slot(
+            "decorations.titlebars.icon-unmaximize-colour",
+            "decorations.titlebars.icon_unmaximize_color",
+        ),
+    }
 }
 
 /// Parses `"#rrggbb"` or `"#rgb"` into 0.0-1.0 float components - ported
