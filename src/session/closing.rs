@@ -278,7 +278,7 @@ fn capture_window_inner<D: SessionDriver>(
         },
         collapse_target: None,
     };
-    let decorations = session.settings.decorations;
+    let decorations = session.settings.decorations.clone();
     let font = session.settings.font.clone();
     let preview_id = session.nodes.id_for_surface(&surface);
     let render = &mut session.render;
