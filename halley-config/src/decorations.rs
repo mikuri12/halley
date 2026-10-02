@@ -28,7 +28,7 @@ pub enum TitlebarContentPosition {
 ///
 /// `height_px` is the requested height. Rendering raises it when necessary to
 /// fit enabled controls, application icons, or the effective title text size.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Titlebars {
     pub enabled: bool,
     pub button_position: TitlebarButtonPosition,
@@ -133,7 +133,7 @@ impl Default for Titlebars {
 /// outer border radius concentrically by the configured border width. It also
 /// clips unmanaged X11 popup content even though those surfaces receive no
 /// compositor border or titlebar.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Decorations {
     pub border_width_px: i32,
     pub border_radius_px: i32,
