@@ -99,6 +99,7 @@ end
                 hide_on_keyboard_nav: false,
                 hide_on_touch: false,
                 hide_after_ms: Some(750),
+                animated: true,
             }
         );
     }
