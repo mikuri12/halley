@@ -757,23 +757,20 @@ pub(super) fn live_window_elements(
 
     let is_focused = Some(window_surface.as_ref()) == context.focused;
     let border_color = crate::render::window_border_color(context.decorations, is_focused);
-    // With a server titlebar the frame covers the decoration too: the
-    // perimeter runs around the layout's `outer` rect (titlebar + body), so
-    // the titlebar gets the same border treatment as the window body and the
-    // secondary border wraps the whole chrome.
-    let chrome_rect = if server_titlebar && chrome_alpha > 0.0 {
-        let outer_width = (visual.animated_rect.size.w + border_width.max(0) * 2).max(1);
-        Some(Rectangle::new(
-            (
-                visual.animated_rect.loc.x - border_width.max(0),
-                visual.animated_rect.loc.y - titlebar_height,
-            )
-                .into(),
-            (outer_width, (titlebar_height + visual.animated_rect.size.h).max(1)).into(),
-        ))
-    } else {
-        None
-    };
+    // Build the titlebar layout once, before the frame, and derive the frame
+    // rect from its `outer`: the layout already carries the +1 content seam
+    // and the bottom border extent, so the frame hugs the exact decoration
+    // geometry instead of a hand-rolled approximation that drifted by 1-2px
+    // at the top and bottom.
+    let titlebar_layout = server_titlebar.then(|| {
+        crate::titlebar::DecorationLayout::new(
+            visual.animated_rect,
+            border_width,
+            titlebar_height,
+            &context.decorations.titlebars,
+        )
+    });
+    let chrome_rect = titlebar_layout.as_ref().map(|layout| layout.outer);
     if managed && border_width > 0 && chrome_alpha > 0.0 {
         if rounded_available
             && let Some(border) = if server_titlebar {
