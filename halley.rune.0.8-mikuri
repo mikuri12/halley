@@ -335,6 +335,11 @@ decorations:
     # por ambos bordes.
     follow-border true
 
+    # Largo (grosor) de la barra de titulo en px. El marco y el segundo
+    # borde se ajustan solos a este valor. Se agranda solo si el titulo o
+    # los botones no caben.
+    height 24
+
     # SVGs propios para los botones (rutas absolutas o relativas a este
     # archivo). Descomenta los que quieras reemplazar:
     # icon-close "~/.config/halley/icons/close.svg"

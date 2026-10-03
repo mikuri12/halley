@@ -581,13 +581,13 @@ impl WindowDecorationRenderer {
         );
         let color = (color.r(), color.g(), color.b(), color.a());
         let size = (destination.size.w as f32, destination.size.h as f32);
-        // The inner (transparent) rect must land exactly on the chrome rect:
-        // destination = chrome outset by border_width, so the inner offset is
-        // precisely border_width on both axes. The JOIN overlap used by the
-        // body-border variant would shrink and shift the hole, leaving a
-        // visible sliver of border over the titlebar and window edges.
+        // Shader convention: the transparent hole is centered at
+        // `inner_rect_offset` relative to the destination's center, and the
+        // destination is this chrome rect outset symmetrically by the border
+        // width — so the hole is exactly the chrome size, centered (zero
+        // offset). Any nonzero offset would push the frame off the window.
         let inner_size = (chrome.size.w as f32, chrome.size.h as f32);
-        let inner_offset = (width_f, width_f);
+        let inner_offset = (0.0, 0.0);
         let outer_radii = CornerRadii::all(metrics.outer_radius);
         let inner_radii = CornerRadii::all(metrics.inner_radius);
         Some(RoundedBorderElement {
