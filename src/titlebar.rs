@@ -203,22 +203,15 @@ impl<K> DecorationLayout<K> {
         let border_width = border_width.max(0);
         let titlebar_height = titlebar_height.max(1);
         let outer_width = (content.size.w + border_width * 2).max(1);
-        // An optional fixed width centers a narrower bar over the window;
-        // otherwise the bar spans the full frame width.
-        let (titlebar_x, titlebar_w) = match config.width_px {
-            Some(width) => {
-                let width = width.clamp(16, outer_width.max(16));
-                let x = content.loc.x - border_width + (outer_width - width) / 2;
-                (x, width)
-            }
-            None => (content.loc.x - border_width, outer_width),
-        };
+        // The bar always spans the full frame width so its left and right
+        // edges land exactly on the perimetral frame drawn around `framed`:
+        // titlebar and frame share the same rect in X.
         // The titlebar stretches one pixel down into the content so scaled
         // geometry can never leave a hairline gap between the decoration and
         // the window surface; the window texture draws over that seam.
         let titlebar = Rectangle::new(
-            (titlebar_x, content.loc.y - titlebar_height).into(),
-            (titlebar_w, titlebar_height + 1).into(),
+            (content.loc.x - border_width, content.loc.y - titlebar_height).into(),
+            (outer_width, titlebar_height + 1).into(),
         );
         let body_outer = Rectangle::new(
             (content.loc.x - border_width, content.loc.y).into(),
