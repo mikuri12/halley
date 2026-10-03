@@ -5,7 +5,11 @@ use smithay::utils::Rectangle;
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::xdg::SurfaceCachedState;
 
+// Retained for compatibility with external tooling that reads the shipped
+// geometry constants; the strict-height titlebar no longer enforces them.
+#[allow(dead_code)]
 pub const MIN_CONTENT_HEIGHT: i32 = 24;
+#[allow(dead_code)]
 pub const TITLE_VERTICAL_PADDING: i32 = 8;
 pub const TITLE_HORIZONTAL_PADDING: i32 = 8;
 pub const APP_ICON_SIZE: i32 = 16;
@@ -193,22 +197,31 @@ impl<K> DecorationLayout<K> {
         let border_width = border_width.max(0);
         let titlebar_height = titlebar_height.max(1);
         let outer_width = (content.size.w + border_width * 2).max(1);
+        // An optional fixed width centers a narrower bar over the window;
+        // otherwise the bar spans the full frame width.
+        let (titlebar_x, titlebar_w) = match config.width_px {
+            Some(width) => {
+                let width = width.clamp(16, outer_width.max(16));
+                let x = content.loc.x - border_width + (outer_width - width) / 2;
+                (x, width)
+            }
+            None => (content.loc.x - border_width, outer_width),
+        };
         // The titlebar stretches one pixel down into the content so scaled
         // geometry can never leave a hairline gap between the decoration and
         // the window surface; the window texture draws over that seam.
         let titlebar = Rectangle::new(
-            (
-                content.loc.x - border_width,
-                content.loc.y - titlebar_height,
-            )
-                .into(),
-            (outer_width, titlebar_height + 1).into(),
+            (titlebar_x, content.loc.y - titlebar_height).into(),
+            (titlebar_w, titlebar_height + 1).into(),
         );
         let body_outer = Rectangle::new(
             (content.loc.x - border_width, content.loc.y).into(),
             (outer_width, (content.size.h + border_width).max(1)).into(),
         );
-        let outer = titlebar.merge(body_outer);
+        let outer = titlebar.merge(body_outer).merge(Rectangle::new(
+            (content.loc.x - border_width, content.loc.y).into(),
+            (outer_width, content.size.h.max(1)).into(),
+        ));
 
         let controls = control_geometry(titlebar, config);
         let left_controls_width =
@@ -438,16 +451,10 @@ pub fn effective_text_size(config: &Titlebars, global_font_size_px: u16) -> u16 
 }
 
 pub fn effective_height(config: &Titlebars, global_font_size_px: u16) -> i32 {
-    let mut required = 1;
-    if config.show_buttons || config.show_icons {
-        required = required.max(MIN_CONTENT_HEIGHT);
-    }
-    if config.show_title {
-        let line_height =
-            (f32::from(effective_text_size(config, global_font_size_px)) * 1.25).ceil() as i32;
-        required = required.max(line_height + TITLE_VERTICAL_PADDING);
-    }
-    config.height_px.max(required).clamp(1, 96)
+    let _ = global_font_size_px;
+    // The configured height is authoritative. Content that does not fit is
+    // clipped by the layout rather than forcing the bar taller.
+    config.height_px.clamp(1, 96)
 }
 
 pub fn glyph_size(titlebar_height: i32) -> i32 {
@@ -690,28 +697,36 @@ mod tests {
     }
 
     #[test]
-    fn enabled_content_raises_but_never_exceeds_height_cap() {
+    fn configured_height_is_authoritative() {
         let compact = Titlebars {
-            height_px: 1,
+            height_px: 16,
             show_title: false,
             ..Titlebars::default()
         };
-        assert_eq!(effective_height(&compact, 11), 24);
+        assert_eq!(effective_height(&compact, 11), 16);
         let text_only = Titlebars {
-            height_px: 1,
+            height_px: 16,
             show_buttons: false,
             show_icons: false,
             ..Titlebars::default()
         };
-        assert_eq!(effective_height(&text_only, 40), 58);
-        assert_eq!(effective_height(&text_only, 200), 96);
+        // The height no longer grows to fit a large title font.
+        assert_eq!(effective_height(&text_only, 40), 16);
+        assert_eq!(effective_height(&text_only, 200), 16);
 
         let overridden = Titlebars {
             text_size_px: Some(18),
             ..text_only
         };
         assert_eq!(effective_text_size(&overridden, 40), 18);
-        assert_eq!(effective_height(&overridden, 40), 31);
+        assert_eq!(effective_height(&overridden, 40), 16);
+
+        // Values outside the range clamp to the cap.
+        let huge = Titlebars {
+            height_px: 4096,
+            ..Titlebars::default()
+        };
+        assert_eq!(effective_height(&huge, 11), 96);
     }
 
     #[test]

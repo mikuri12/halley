@@ -39,7 +39,10 @@ pub struct Titlebars {
     /// Optional title-only font size. `None` inherits the global font size.
     pub text_size_px: Option<u16>,
     pub radius_px: i32,
+    /// Strict bar thickness in px (1-96). Never auto-grows for content.
     pub height_px: i32,
+    /// Optional fixed bar width in px. `None` spans the window width.
+    pub width_px: Option<i32>,
     pub color_focused: BorderColor,
     pub color_unfocused: BorderColor,
     pub foreground_color_focused: BorderColor,
@@ -90,6 +93,7 @@ impl Default for Titlebars {
             text_size_px: None,
             radius_px: 8,
             height_px: 32,
+            width_px: None,
             color_focused: BorderColor {
                 r: 0xd6 as f32 / 255.0,
                 g: 0x5d as f32 / 255.0,
@@ -281,6 +285,11 @@ pub fn parse_decorations(config: &RuneConfig) -> Decorations {
         height_px: config
             .get_or("decorations.titlebars.height", titlebar_defaults.height_px)
             .clamp(1, 96),
+        width_px: config
+            .get_optional::<i64>("decorations.titlebars.width")
+            .ok()
+            .flatten()
+            .map(|width| width.clamp(16, 16_384) as i32),
         color_focused: parse_color(
             config,
             &[

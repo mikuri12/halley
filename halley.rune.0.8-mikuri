@@ -335,10 +335,13 @@ decorations:
     # por ambos bordes.
     follow-border true
 
-    # Largo (grosor) de la barra de titulo en px. El marco y el segundo
-    # borde se ajustan solos a este valor. Se agranda solo si el titulo o
-    # los botones no caben.
+    # Alto (grosor) estricto de la barra en px: se respeta tal cual,
+    # nunca se agranda solo por el contenido. Rango 1-96.
     height 24
+
+    # Largo (ancho) fijo de la barra en px. Sin esta linea, la barra
+    # ocupa el ancho completo de la ventana. Se centra sobre la ventana.
+    # width 600
 
     # SVGs propios para los botones (rutas absolutas o relativas a este
     # archivo). Descomenta los que quieras reemplazar:
