@@ -193,13 +193,16 @@ impl<K> DecorationLayout<K> {
         let border_width = border_width.max(0);
         let titlebar_height = titlebar_height.max(1);
         let outer_width = (content.size.w + border_width * 2).max(1);
+        // The titlebar stretches one pixel down into the content so scaled
+        // geometry can never leave a hairline gap between the decoration and
+        // the window surface; the window texture draws over that seam.
         let titlebar = Rectangle::new(
             (
                 content.loc.x - border_width,
                 content.loc.y - titlebar_height,
             )
                 .into(),
-            (outer_width, titlebar_height).into(),
+            (outer_width, titlebar_height + 1).into(),
         );
         let body_outer = Rectangle::new(
             (content.loc.x - border_width, content.loc.y).into(),
