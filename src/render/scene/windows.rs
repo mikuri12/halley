@@ -757,17 +757,34 @@ pub(super) fn live_window_elements(
 
     let is_focused = Some(window_surface.as_ref()) == context.focused;
     let border_color = crate::render::window_border_color(context.decorations, is_focused);
+    // With a server titlebar the frame covers the decoration too: the
+    // perimeter runs around the layout's `outer` rect (titlebar + body), so
+    // the titlebar gets the same border treatment as the window body and the
+    // secondary border wraps the whole chrome.
+    let chrome_rect = if server_titlebar && chrome_alpha > 0.0 {
+        let outer_width = (visual.animated_rect.size.w + border_width.max(0) * 2).max(1);
+        Some(Rectangle::new(
+            (
+                visual.animated_rect.loc.x - border_width.max(0),
+                visual.animated_rect.loc.y - titlebar_height,
+            )
+                .into(),
+            (outer_width, (titlebar_height + visual.animated_rect.size.h).max(1)).into(),
+        ))
+    } else {
+        None
+    };
     if managed && border_width > 0 && chrome_alpha > 0.0 {
         if rounded_available
             && let Some(border) = if server_titlebar {
-                window_decoration_renderer.body_border_element(
+                window_decoration_renderer.chrome_border_element(
                     renderer,
                     crate::render::window_decoration::surface_slot_for_instance(
                         window_surface.as_ref(),
                         crate::render::window_decoration::slot::BODY_BORDER,
                         context.instance_identity,
                     ),
-                    visual.animated_rect,
+                    chrome_rect.unwrap_or(visual.animated_rect),
                     border_width,
                     content_radius,
                     border_color,
@@ -792,7 +809,8 @@ pub(super) fn live_window_elements(
             elements.push(SceneElement::WindowBorder(border));
         } else {
             let strips: Vec<_> = if server_titlebar {
-                crate::render::body_border_strips(
+                // Full perimeter around the chrome (titlebar + body).
+                crate::render::border_strips(
                     std::array::from_fn(|index| {
                         crate::render::window_decoration::surface_slot_for_instance(
                             window_surface.as_ref(),
@@ -800,7 +818,7 @@ pub(super) fn live_window_elements(
                             context.instance_identity,
                         )
                     }),
-                    visual.animated_rect,
+                    chrome_rect.unwrap_or(visual.animated_rect),
                     border_width,
                     border_color * chrome_alpha,
                 )
@@ -836,15 +854,14 @@ pub(super) fn live_window_elements(
         && chrome_alpha > 0.0
     {
         let outset = border_width.max(0) + secondary.gap_px.max(0);
+        // Wrap the full chrome: with a server titlebar the outer frame runs
+        // around the decoration too, not just the window body.
+        let base_rect = chrome_rect.unwrap_or(visual.animated_rect);
         let rect = Rectangle::new(
+            (base_rect.loc.x - outset, base_rect.loc.y - outset).into(),
             (
-                visual.animated_rect.loc.x - outset,
-                visual.animated_rect.loc.y - outset,
-            )
-                .into(),
-            (
-                (visual.animated_rect.size.w + outset * 2).max(1),
-                (visual.animated_rect.size.h + outset * 2).max(1),
+                (base_rect.size.w + outset * 2).max(1),
+                (base_rect.size.h + outset * 2).max(1),
             )
                 .into(),
         );

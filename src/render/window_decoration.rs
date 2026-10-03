@@ -529,6 +529,87 @@ impl WindowDecorationRenderer {
         })
     }
 
+    /// A full-perimeter frame around a rect that already includes the server
+    /// titlebar (the layout's `outer`), so the border covers the decoration
+    /// the same way it covers the window body. Radii on all four corners.
+    #[allow(clippy::too_many_arguments)]
+    pub fn chrome_border_element(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        id: Id,
+        chrome: Rectangle<i32, Physical>,
+        width: i32,
+        radius: f32,
+        color: smithay::backend::renderer::Color32F,
+        alpha: f32,
+    ) -> Option<RoundedBorderElement> {
+        if width <= 0 || alpha <= 0.0 {
+            return None;
+        }
+        self.available(renderer);
+        let resources = self.resources.as_ref()?;
+        let width_i = width.max(0);
+        let width_f = width_i as f32;
+        let metrics = metrics(radius.max(0.0), width_f);
+        let destination = Rectangle::new(
+            (chrome.loc.x - width_i, chrome.loc.y - width_i).into(),
+            (
+                (chrome.size.w + width_i * 2).max(1),
+                (chrome.size.h + width_i * 2).max(1),
+            )
+                .into(),
+        );
+        let source = Rectangle::<f64, Logical>::from_size(
+            resources
+                .white
+                .size()
+                .to_logical(1, Transform::Normal)
+                .to_f64(),
+        );
+        let base = TextureRenderElement::from_static_texture(
+            id,
+            resources.context.clone(),
+            destination.loc.to_f64(),
+            resources.white.clone(),
+            1,
+            Transform::Normal,
+            Some(alpha.clamp(0.0, 1.0)),
+            Some(source),
+            Some(destination.size.to_logical(1)),
+            None,
+            Kind::Unspecified,
+        );
+        let color = (color.r(), color.g(), color.b(), color.a());
+        let size = (destination.size.w as f32, destination.size.h as f32);
+        let inner_size = (
+            (chrome.size.w as f32 - JOIN_OVERLAP_PX * 2.0).max(1.0),
+            (chrome.size.h as f32 - JOIN_OVERLAP_PX * 2.0).max(1.0),
+        );
+        let inner_offset = (metrics.inner_offset, metrics.inner_offset);
+        let outer_radii = CornerRadii::all(metrics.outer_radius);
+        let inner_radii = CornerRadii::all(metrics.inner_radius);
+        Some(RoundedBorderElement {
+            base,
+            white: resources.white.clone(),
+            program: resources.border.clone(),
+            commit: border_commit(
+                color,
+                size,
+                inner_size,
+                inner_offset,
+                outer_radii,
+                inner_radii,
+            ),
+            color,
+            size,
+            inner_size,
+            inner_offset,
+            outer_radii,
+            inner_radii,
+            damage: border_damage(destination.size, width_i.saturating_add(2)),
+        })
+    }
+
     pub fn texture_element(
         &mut self,
         renderer: &mut GlesRenderer,
