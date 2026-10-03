@@ -173,6 +173,12 @@ pub struct DecorationLayout<K> {
     pub titlebar: Rectangle<i32, K>,
     pub body_outer: Rectangle<i32, K>,
     pub outer: Rectangle<i32, K>,
+    /// The rect a perimetral frame should hug: titlebar + content, WITHOUT
+    /// the bottom border extension. `outer` extends one border width below
+    /// the content for the legacy three-sided body frame; using it as the
+    /// frame hole leaves a border-width gap on the left and right of the
+    /// window because outer is also content + 2*border wide.
+    pub framed: Rectangle<i32, K>,
     pub controls: Vec<ControlGeometry<K>>,
     pub identity_area: Rectangle<i32, K>,
     titlebar_center_x2: i32,
@@ -218,9 +224,17 @@ impl<K> DecorationLayout<K> {
             (content.loc.x - border_width, content.loc.y).into(),
             (outer_width, (content.size.h + border_width).max(1)).into(),
         );
-        let outer = titlebar.merge(body_outer).merge(Rectangle::new(
-            (content.loc.x - border_width, content.loc.y).into(),
-            (outer_width, content.size.h.max(1)).into(),
+        let outer = titlebar
+            .merge(body_outer)
+            .merge(Rectangle::new(
+                (content.loc.x - border_width, content.loc.y).into(),
+                (outer_width, content.size.h.max(1)).into(),
+            ));
+        // The visible chrome a perimetral frame hugs: titlebar plus content,
+        // no border extensions in any direction.
+        let framed = titlebar.merge(Rectangle::new(
+            content.loc,
+            (content.size.w.max(1), content.size.h.max(1)).into(),
         ));
 
         let controls = control_geometry(titlebar, config);
@@ -249,6 +263,7 @@ impl<K> DecorationLayout<K> {
             titlebar,
             body_outer,
             outer,
+            framed,
             controls,
             identity_area,
             titlebar_center_x2: titlebar

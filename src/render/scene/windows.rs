@@ -770,7 +770,7 @@ pub(super) fn live_window_elements(
             &context.decorations.titlebars,
         )
     });
-    let chrome_rect = titlebar_layout.as_ref().map(|layout| layout.outer);
+    let chrome_rect = titlebar_layout.as_ref().map(|layout| layout.framed);
     if managed && border_width > 0 && chrome_alpha > 0.0 {
         if rounded_available
             && let Some(border) = if server_titlebar {
