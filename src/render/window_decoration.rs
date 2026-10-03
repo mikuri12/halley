@@ -581,11 +581,13 @@ impl WindowDecorationRenderer {
         );
         let color = (color.r(), color.g(), color.b(), color.a());
         let size = (destination.size.w as f32, destination.size.h as f32);
-        let inner_size = (
-            (chrome.size.w as f32 - JOIN_OVERLAP_PX * 2.0).max(1.0),
-            (chrome.size.h as f32 - JOIN_OVERLAP_PX * 2.0).max(1.0),
-        );
-        let inner_offset = (metrics.inner_offset, metrics.inner_offset);
+        // The inner (transparent) rect must land exactly on the chrome rect:
+        // destination = chrome outset by border_width, so the inner offset is
+        // precisely border_width on both axes. The JOIN overlap used by the
+        // body-border variant would shrink and shift the hole, leaving a
+        // visible sliver of border over the titlebar and window edges.
+        let inner_size = (chrome.size.w as f32, chrome.size.h as f32);
+        let inner_offset = (width_f, width_f);
         let outer_radii = CornerRadii::all(metrics.outer_radius);
         let inner_radii = CornerRadii::all(metrics.inner_radius);
         Some(RoundedBorderElement {
