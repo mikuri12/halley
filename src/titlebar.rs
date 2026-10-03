@@ -202,26 +202,32 @@ impl<K> DecorationLayout<K> {
     ) -> Self {
         let border_width = border_width.max(0);
         let titlebar_height = titlebar_height.max(1);
-        let outer_width = (content.size.w + border_width * 2).max(1);
-        // The bar always spans the full frame width so its left and right
-        // edges land exactly on the perimetral frame drawn around `framed`:
-        // titlebar and frame share the same rect in X.
-        // The titlebar stretches one pixel down into the content so scaled
-        // geometry can never leave a hairline gap between the decoration and
-        // the window surface; the window texture draws over that seam.
+        // The bar matches the window width exactly: its left and right edges
+        // land on the window's own edges, so the perimetral frame, the bar
+        // and the window surface all share the same vertical lines. A bar
+        // wider than the window would leave an unpainted border-width strip
+        // on each side of the window body below the bar.
         let titlebar = Rectangle::new(
-            (content.loc.x - border_width, content.loc.y - titlebar_height).into(),
-            (outer_width, titlebar_height + 1).into(),
+            (content.loc.x, content.loc.y - titlebar_height).into(),
+            (content.size.w.max(1), titlebar_height + 1).into(),
         );
         let body_outer = Rectangle::new(
             (content.loc.x - border_width, content.loc.y).into(),
-            (outer_width, (content.size.h + border_width).max(1)).into(),
+            (
+                (content.size.w + border_width * 2).max(1),
+                (content.size.h + border_width).max(1),
+            )
+                .into(),
         );
         let outer = titlebar
             .merge(body_outer)
             .merge(Rectangle::new(
                 (content.loc.x - border_width, content.loc.y).into(),
-                (outer_width, content.size.h.max(1)).into(),
+                (
+                    (content.size.w + border_width * 2).max(1),
+                    content.size.h.max(1),
+                )
+                    .into(),
             ));
         // The visible chrome a perimetral frame hugs: titlebar plus content,
         // no border extensions in any direction.
