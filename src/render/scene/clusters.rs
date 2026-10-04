@@ -71,6 +71,7 @@ pub(super) struct ClusterElementContext<'a> {
 pub(super) fn cluster_elements(
     renderer: &mut GlesRenderer,
     cluster_renderer: &mut crate::clusters::render::ClusterRenderer,
+    live_window_rects: Vec<Rectangle<i32, Physical>>,
     context: ClusterElementContext<'_>,
 ) -> Result<Vec<StackGroup>, Box<dyn Error>> {
     let ClusterElementContext {
@@ -106,31 +107,20 @@ pub(super) fn cluster_elements(
     let output_name = output.name();
     let join_readiness = clusters.join_readiness_on_output(&output_name);
 
-    // Labels share the desktop stack with the cluster core. Use the same
-    // presentation geometry as live-window rendering so a label never chooses
-    // space that only appears empty before camera or opening transforms.
-    let mut fixed_label_obstacles = space
-        .elements()
-        .filter(|window| crate::wayland::window_is_on_output(window, output, primary_output))
-        .filter_map(|window| {
-            crate::presentation::window::window_visual_state(
-                space,
-                cameras,
-                Some(clusters),
-                Some(nodes),
-                window,
-                output,
-                window_animations,
-                fullscreen,
-                maximize,
-                decorations,
-                font,
-                now,
-            )
-        })
-        .filter(|visual| visual.opening_alpha > 0.01)
-        .map(|visual| visual.animated_rect)
-        .collect::<Vec<_>>();
+    // Labels share the desktop stack with the cluster core. The frame's
+    // window rects arrive precomputed from the live-window scenes: geometry
+    // and opening alphas are identical to what rendering used, without
+    // recomputing window_visual_state per window a second time.
+    let _ = (
+        space,
+        primary_output,
+        window_animations,
+        fullscreen,
+        maximize,
+        decorations,
+        font,
+    );
+    let mut fixed_label_obstacles = live_window_rects;
     fixed_label_obstacles.extend(
         nodes
             .collapsed_on_output(&output_name)

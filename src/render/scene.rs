@@ -760,6 +760,7 @@ pub fn build(
     let cluster_scene = cluster_elements(
         renderer,
         request.resources.cluster_renderer,
+        live_window_rects,
         ClusterElementContext {
             output,
             primary_output,
@@ -919,6 +920,15 @@ pub fn build(
         }),
         None => (Vec::new(), live_windows),
     };
+    // Label placement needs the frame's window rects. Collect them once from
+    // the scenes already built instead of recomputing window_visual_state per
+    // window inside cluster_elements — that duplicated the most expensive
+    // per-frame path (O(windows x cluster members)) for label obstacles.
+    let live_window_rects: Vec<Rectangle<i32, Physical>> = live_windows
+        .iter()
+        .filter(|(_, scene)| scene.opening_alpha > 0.01)
+        .map(|(_, scene)| scene.animated_rect)
+        .collect();
     // A cluster workspace is one coherent stack. Preserve its position
     // relative to non-cluster windows at the topmost member's existing Space
     // slot, then use the layout's explicit depth for member overlap.

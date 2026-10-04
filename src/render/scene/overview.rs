@@ -256,6 +256,22 @@ pub(super) fn apogee_elements(
             )?);
             continue;
         }
+        let Some(source) = overview_window_source_rect(
+            output,
+            output_geometry,
+            tile.id,
+            decorations,
+            font,
+            space,
+            cameras,
+            nodes,
+            window_animations,
+            fullscreen,
+            maximize,
+            now,
+        ) else {
+            continue;
+        };
         push_overview_window(
             &mut elements,
             renderer,
@@ -263,6 +279,7 @@ pub(super) fn apogee_elements(
             output_geometry,
             tile.id,
             tile.target,
+            source,
             None,
             progress,
             session.selected == Some(tile.id),
@@ -368,6 +385,7 @@ pub(super) fn push_overview_window(
     output_geometry: Rectangle<i32, Logical>,
     id: halley_core::field::NodeId,
     target_global: Rectangle<i32, Logical>,
+    source: Rectangle<i32, Physical>,
     body_override: Option<Rectangle<i32, Physical>>,
     progress: f32,
     focused: bool,
@@ -398,23 +416,8 @@ pub(super) fn push_overview_window(
         (target_global.loc - output_geometry.loc).to_physical(1),
         target_global.size.to_physical(1),
     );
-    let Some(source) = overview_window_source_rect(
-        output,
-        output_geometry,
-        id,
-        decorations,
-        font,
-        space,
-        cameras,
-        nodes,
-        window_animations,
-        fullscreen,
-        maximize,
-        now,
-    ) else {
-        return Ok(());
-    };
-    let body = body_override.unwrap_or_else(|| lerp_rect(source, target, progress));
+    let source_rect = source;
+    let body = body_override.unwrap_or_else(|| lerp_rect(source_rect, target, progress));
     let (mut card_visuals, mut caption_fill, mut card_fill) =
         apogee_window_chrome(overlay_visuals, focused, hovered);
     let mut caption_text = overlay_visuals.text;

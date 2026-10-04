@@ -152,6 +152,7 @@ pub(super) fn cluster_composer_elements(
             output_geometry,
             tile.id,
             tile.target,
+            source.unwrap_or(mosaic),
             body,
             progress,
             focused && !committing,

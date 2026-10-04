@@ -21,6 +21,11 @@ pub(super) struct LiveWindowScene {
     pub(super) cluster_depth: Option<usize>,
     pub(super) cluster_floating: bool,
     pub(super) cluster_exclusive: bool,
+    /// The visual state this scene was built from, so downstream consumers
+    /// (cluster label placement) reuse the frame's geometry instead of
+    /// recomputing window_visual_state per window a second time.
+    pub(super) animated_rect: Rectangle<i32, Physical>,
+    pub(super) opening_alpha: f32,
 }
 
 pub(super) struct LiveWindowRenderers<'a> {
@@ -258,6 +263,8 @@ pub(super) fn live_window_elements(
             cluster_depth: None,
             cluster_floating: false,
             cluster_exclusive: false,
+            animated_rect: Rectangle::new((0, 0).into(), (0, 0).into()),
+            opening_alpha: 0.0,
         });
     };
     let Some(window_surface) = window.wl_surface() else {
@@ -267,6 +274,8 @@ pub(super) fn live_window_elements(
             cluster_depth: None,
             cluster_floating: false,
             cluster_exclusive: false,
+            animated_rect: Rectangle::new((0, 0).into(), (0, 0).into()),
+            opening_alpha: 0.0,
         });
     };
     let join_ready = context
@@ -315,6 +324,8 @@ pub(super) fn live_window_elements(
             cluster_depth: None,
             cluster_floating: false,
             cluster_exclusive: false,
+            animated_rect: Rectangle::new((0, 0).into(), (0, 0).into()),
+            opening_alpha: 0.0,
         });
     };
     if visual.animated_rect.size.w == 0 || visual.animated_rect.size.h == 0 {
@@ -324,6 +335,8 @@ pub(super) fn live_window_elements(
             cluster_depth: visual.cluster_depth,
             cluster_floating: visual.cluster_floating,
             cluster_exclusive: visual.cluster_exclusive,
+            animated_rect: visual.animated_rect,
+            opening_alpha: visual.opening_alpha,
         });
     }
 
@@ -478,6 +491,8 @@ pub(super) fn live_window_elements(
                     cluster_depth: visual.cluster_depth,
                     cluster_floating: visual.cluster_floating,
                     cluster_exclusive: visual.cluster_exclusive,
+                    animated_rect: visual.animated_rect,
+                    opening_alpha: visual.opening_alpha,
                 });
             }
             Ok(None) => {}
@@ -1016,6 +1031,8 @@ pub(super) fn live_window_elements(
         cluster_depth: visual.cluster_depth,
         cluster_floating: visual.cluster_floating,
         cluster_exclusive: visual.cluster_exclusive,
+        animated_rect: visual.animated_rect,
+        opening_alpha: visual.opening_alpha,
     })
 }
 
