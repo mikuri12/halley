@@ -757,34 +757,6 @@ pub fn build(
         })
         .collect::<Result<Vec<_>, _>>()?;
     stack.extend(node_scene.groups);
-    let cluster_scene = cluster_elements(
-        renderer,
-        request.resources.cluster_renderer,
-        live_window_rects,
-        ClusterElementContext {
-            output,
-            primary_output,
-            output_geometry,
-            space: request.desktop.space,
-            clusters: request.desktop.clusters,
-            nodes: request.desktop.nodes,
-            cameras: request.desktop.cameras,
-            window_animations: request.desktop.window_animations,
-            fullscreen: request.desktop.fullscreen,
-            maximize: request.desktop.maximize,
-            decorations: request.visuals.decorations,
-            font: request.visuals.font,
-            pins: request.visuals.pins,
-            overlays: request.overlays.overlay_config,
-            pin_renderer: request.resources.pin_renderer,
-            shadow_config: request.visuals.shadows.node,
-            shadow_renderer: request.resources.shadow_renderer,
-            node_grab_active: request.desktop.node_grab_active,
-            now: request.frame.target_presentation_time,
-            node_renderer: request.resources.node_renderer,
-            ui_text: request.resources.ui_text,
-        },
-    )?;
     let cluster_bloom = super::overlays::cluster_bloom::elements(
         renderer,
         super::overlays::cluster_bloom::BloomElementContext {
@@ -813,7 +785,6 @@ pub fn build(
         },
     )?;
     elements.extend(cluster_overflow);
-    stack.extend(cluster_scene);
     let context = LiveWindowContext {
         space: request.desktop.space,
         output,
@@ -929,6 +900,36 @@ pub fn build(
         .filter(|(_, scene)| scene.opening_alpha > 0.01)
         .map(|(_, scene)| scene.animated_rect)
         .collect();
+    let cluster_scene = cluster_elements(
+        renderer,
+        request.resources.cluster_renderer,
+        live_window_rects,
+        ClusterElementContext {
+            output,
+            primary_output,
+            output_geometry,
+            space: request.desktop.space,
+            clusters: request.desktop.clusters,
+            nodes: request.desktop.nodes,
+            cameras: request.desktop.cameras,
+            window_animations: request.desktop.window_animations,
+            fullscreen: request.desktop.fullscreen,
+            maximize: request.desktop.maximize,
+            decorations: request.visuals.decorations,
+            font: request.visuals.font,
+            pins: request.visuals.pins,
+            overlays: request.overlays.overlay_config,
+            pin_renderer: request.resources.pin_renderer,
+            shadow_config: request.visuals.shadows.node,
+            shadow_renderer: request.resources.shadow_renderer,
+            node_grab_active: request.desktop.node_grab_active,
+            now: request.frame.target_presentation_time,
+            node_renderer: request.resources.node_renderer,
+            ui_text: request.resources.ui_text,
+        },
+    )?;
+    stack.extend(cluster_scene);
+
     // A cluster workspace is one coherent stack. Preserve its position
     // relative to non-cluster windows at the topmost member's existing Space
     // slot, then use the layout's explicit depth for member overlap.
