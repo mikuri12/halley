@@ -143,7 +143,7 @@ impl ClusterSystem {
                 .is_some_and(|reflow| now.saturating_sub(reflow.started_at) < reflow.duration)
     }
 
-    fn transition_is_live(&self, transition: &WorkspaceTransition, now: Duration) -> bool {
+    pub(super) fn transition_is_live(&self, transition: &WorkspaceTransition, now: Duration) -> bool {
         let stagger_tail = transition
             .stagger
             .saturating_mul(transition.visible_members.saturating_sub(1) as u32);

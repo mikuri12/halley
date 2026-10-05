@@ -172,7 +172,8 @@ pub struct ClusterSystem {
     /// member window per frame — O(members^2) layout passes on the canvas.
     /// The key quantizes time below one frame; mutation paths invalidate via
     /// `invalidate_layout_cache` so structural changes never read a stale hit.
-    layout_cache: RefCell<HashMap<(ClusterId, Rectangle<i32, Logical>), Option<ClusterWorkspaceLayoutResult>>>,
+    layout_cache:
+        RefCell<HashMap<(u64, i32, i32, i32, i32), Option<ClusterWorkspaceLayoutResult>>>,
     layout_cache_frame: Cell<Option<Duration>>,
     creation: Option<CreationState>,
     pending_draft: Option<DraftBuild>,
@@ -1482,13 +1483,14 @@ impl ClusterSystem {
             self.layout_cache.borrow_mut().clear();
             self.layout_cache_frame.set(Some(frame));
         }
-        if let Some(cached) = self.layout_cache.borrow().get(&(id, work_area)) {
+        let key = Self::layout_cache_key(id, work_area);
+        if let Some(cached) = self.layout_cache.borrow().get(&key) {
             return cached.clone();
         }
         let result = self.compute_workspace_layout(id, work_area);
         self.layout_cache
             .borrow_mut()
-            .insert((id, work_area), result.clone());
+            .insert(key, result.clone());
         result
     }
 
@@ -1498,6 +1500,19 @@ impl ClusterSystem {
     pub(crate) fn invalidate_layout_cache(&self) {
         self.layout_cache.borrow_mut().clear();
         self.layout_cache_frame.set(None);
+    }
+
+    fn layout_cache_key(
+        id: ClusterId,
+        work_area: Rectangle<i32, Logical>,
+    ) -> (u64, i32, i32, i32, i32) {
+        (
+            id.as_u64(),
+            work_area.loc.x,
+            work_area.loc.y,
+            work_area.size.w,
+            work_area.size.h,
+        )
     }
 
     fn compute_workspace_layout(
