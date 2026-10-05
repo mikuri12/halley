@@ -1453,6 +1453,7 @@ fn redraw_output(app: &mut TtyApp, output: &Output, loop_handle: &LoopHandle<'_,
         // A commit produced by these callbacks remains gated on that vblank.
         send_output_frame_callbacks(app, output);
         app.service_screencopy(output);
+        profile.finish(&output.name());
         return;
     }
 

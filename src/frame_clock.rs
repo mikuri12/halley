@@ -9,7 +9,7 @@ use smithay::utils::{Clock, Monotonic};
 /// nested winit) leave `refresh_interval` unset and sample at `now`.
 #[derive(Clone, Debug)]
 pub struct FrameClock {
-    refresh_interval: Option<Duration>,
+    pub(crate) refresh_interval: Option<Duration>,
     last_presentation_time: Option<Duration>,
     vrr: bool,
 }

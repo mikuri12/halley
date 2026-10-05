@@ -209,7 +209,7 @@ impl OutputFrameState {
     /// reused; otherwise the caller receives the delay for one new timer.
     pub fn frame_skipped(&mut self, animating: bool, now: Duration) -> EstimatedVblankTimer {
         self.unfinished_animations = animating;
-        match std::mem::take(&mut self.redraw) {
+        match std::mem::take(&self.redraw) {
             RedrawState::Queued => {}
             RedrawState::WaitingForEstimatedVBlank(token)
             | RedrawState::WaitingForEstimatedVBlankAndQueued(token) => {
@@ -222,7 +222,18 @@ impl OutputFrameState {
         }
 
         let due = self.clock.next_presentation_time(now);
-        EstimatedVblankTimer::ArmAfter(due.saturating_sub(now).max(Duration::from_millis(1)))
+        let delay = due.saturating_sub(now);
+        // A skipped render means the previous page flip is still pending:
+        // the kernel has not completed it, so retrying sooner than half a
+        // refresh cannot present anything new and only burns CPU. Observed on
+        // Intel iGPUs during heavy scenes (cluster composer) where the flip
+        // completes just after the retry deadline, feeding a ~4x render loop.
+        let min_retry = self
+            .clock
+            .refresh_interval
+            .map(|interval| interval / 2)
+            .unwrap_or(Duration::from_millis(4));
+        EstimatedVblankTimer::ArmAfter(delay.max(min_retry))
     }
 
     pub fn timer_armed(&mut self, token: RegistrationToken) {
@@ -344,9 +355,22 @@ mod tests {
         let mut state = state();
         state.queue_redraw();
 
+        // A skipped render retries no sooner than half a refresh: the page
+        // flip is still pending, and an earlier retry only burns CPU.
         assert_eq!(
             state.frame_skipped(false, Duration::from_secs(5)),
-            EstimatedVblankTimer::ArmAfter(Duration::from_millis(1))
+            EstimatedVblankTimer::ArmAfter(Duration::from_millis(5))
+        );
+    }
+
+    #[test]
+    fn skipped_frame_retry_never_falls_below_half_refresh() {
+        let mut state = OutputFrameState::new(Duration::from_millis(16));
+        state.queue_redraw();
+
+        assert_eq!(
+            state.frame_skipped(false, Duration::from_millis(20)),
+            EstimatedVblankTimer::ArmAfter(Duration::from_millis(8))
         );
     }
 
