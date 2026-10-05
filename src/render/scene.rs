@@ -772,7 +772,7 @@ pub fn build(
             node_renderer: request.resources.node_renderer,
             ui_text: request.resources.ui_text,
         },
-    )?;
+    ))?;
     elements.extend(cluster_bloom);
     let cluster_overflow = crate::frame_profile::scoped("scene_overflow", || super::overlays::cluster_overflow::elements(
         renderer,
@@ -785,7 +785,7 @@ pub fn build(
             node_renderer: request.resources.node_renderer,
             ui_text: request.resources.ui_text,
         },
-    )?;
+    ))?;
     elements.extend(cluster_overflow);
     let context = LiveWindowContext {
         space: request.desktop.space,
@@ -936,7 +936,7 @@ pub fn build(
             node_renderer: request.resources.node_renderer,
             ui_text: request.resources.ui_text,
         },
-    )?;
+    ))?;
     stack.extend(cluster_scene);
 
     // A cluster workspace is one coherent stack. Preserve its position
