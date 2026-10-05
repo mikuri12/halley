@@ -95,9 +95,9 @@ impl FrameTimer {
     }
 }
 
-/// Times one labeled section when profiling is enabled, logging it directly.
-/// Used where a FrameTimer cannot flow (scene::build inside the backend).
-pub fn scoped<F: FnOnce() -> T, T>(label: &'static str, f: F) -> T {
+/// Times one labeled section when profiling is enabled. Closures return
+/// their value unchanged (Result included) so `?` stays at the call site.
+pub fn scoped<T>(label: &'static str, f: impl FnOnce() -> T) -> T {
     if !enabled() {
         return f();
     }
