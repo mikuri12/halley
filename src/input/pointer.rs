@@ -72,8 +72,9 @@ const POINTER_GEOMETRY_FRAME_STEP_MS: u64 = 8;
 
 impl PointerGeometryCache {
     fn frame_key(now: std::time::Duration) -> std::time::Duration {
-        let step = std::time::Duration::from_millis(POINTER_GEOMETRY_FRAME_STEP_MS);
-        now - (now % step)
+        let step_ns = POINTER_GEOMETRY_FRAME_STEP_MS.saturating_mul(1_000_000);
+        let now_ns = now.as_nanos() as u64;
+        std::time::Duration::from_nanos(now_ns - now_ns % step_ns)
     }
 
     /// Returns the memoized entries for the frame containing `frame`, building
