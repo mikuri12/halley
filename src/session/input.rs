@@ -1575,6 +1575,23 @@ where
     D: SessionDriver,
     B: InputBackend,
 {
+    let is_motion = matches!(
+        event,
+        InputEvent::PointerMotion { .. } | InputEvent::PointerMotionAbsolute { .. }
+    );
+    let profile_start = std::time::Instant::now();
+    let result = handle_inner(session, event, socket_name);
+    if is_motion && crate::frame_profile::enabled() {
+        crate::frame_profile::record_motion(profile_start.elapsed());
+    }
+    result
+}
+
+fn handle_inner<D, B>(session: &mut Session<D>, event: &InputEvent<B>, socket_name: &OsStr)
+where
+    D: SessionDriver,
+    B: InputBackend,
+{
     let steam_close_press = match event {
         InputEvent::PointerButton { event } => take_steam_close_press(
             &mut session.interactions.steam_close_pressed,

@@ -1156,6 +1156,8 @@ fn redraw_output(app: &mut TtyApp, output: &Output, loop_handle: &LoopHandle<'_,
             .expect("redraw output has frame state");
         state.next_frame_sample(now)
     };
+    let mut profile = crate::frame_profile::begin();
+    profile.mark("pre");
 
     let pointer_is_on_output = app
         .wayland
@@ -1257,6 +1259,7 @@ fn redraw_output(app: &mut TtyApp, output: &Output, loop_handle: &LoopHandle<'_,
         .target_output()
         .is_some_and(|name| name == output.name())
         && crate::shell::cluster_composer::tick_session(app, target_presentation_time);
+    profile.mark("composer");
     let apogee_animating = crate::shell::apogee::tick(app, target_presentation_time);
     let background_animating = app.background_animates_on_output(output, target_presentation_time);
     let overlay_animating = app.shell.overlays.animating(target_presentation_time);
@@ -1326,6 +1329,7 @@ fn redraw_output(app: &mut TtyApp, output: &Output, loop_handle: &LoopHandle<'_,
         super::pointer::update_client_state(app, app.start_time.elapsed().as_millis() as u32);
     }
     super::trace::snapshot(app);
+    profile.mark("ticks");
     let vrr_auto_eligible = auto_vrr_eligible(app, output, target_presentation_time);
 
     let outcome = match app.driver.backend.render(
@@ -1389,6 +1393,7 @@ fn redraw_output(app: &mut TtyApp, output: &Output, loop_handle: &LoopHandle<'_,
             RenderOutcome::new(RenderStatus::Skipped, None)
         }
     };
+    profile.mark("render");
     animating |= app.render.node_renderer.has_pending_icons();
     if app.window_animations.cleanup(target_presentation_time) {
         // The frame just composed can still scale a lagging pre-configure
@@ -1452,6 +1457,7 @@ fn redraw_output(app: &mut TtyApp, output: &Output, loop_handle: &LoopHandle<'_,
     }
 
     queue_estimated_vblank_timer(app, output, animating, loop_handle);
+    profile.finish(&output.name());
 }
 
 fn auto_vrr_eligible(app: &TtyApp, output: &Output, now: Duration) -> bool {

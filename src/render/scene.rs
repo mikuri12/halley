@@ -191,7 +191,7 @@ pub fn build(
         .replacement_output()
         .is_some_and(|name| name == output.name())
     {
-        let mut elements = cluster_composer_elements(
+        let mut elements = crate::frame_profile::scoped("scene_composer", || cluster_composer_elements(
             renderer,
             output,
             output_geometry,
@@ -214,7 +214,7 @@ pub fn build(
             request.desktop.maximize,
             request.resources.overlay_previews,
             request.frame.target_presentation_time,
-        )?;
+        ))?;
         append_overlay_shadows(
             renderer,
             output,
@@ -340,7 +340,7 @@ pub fn build(
     // desktop. Keep only its tiles and the wallpaper layer behind them; normal
     // windows, nodes, panels, and desktop overlays must not bleed through.
     if request.overlays.apogee.is_active() {
-        let mut elements = apogee_elements(
+        let mut elements = crate::frame_profile::scoped("scene_apogee", || apogee_elements(
             renderer,
             output,
             output_geometry,
@@ -363,7 +363,7 @@ pub fn build(
             request.desktop.maximize,
             request.resources.overlay_previews,
             request.frame.target_presentation_time,
-        )?;
+        ))?;
         append_overlay_shadows(
             renderer,
             output,
@@ -627,7 +627,8 @@ pub fn build(
     )?;
     elements.extend(hover_preview);
 
-    let node_scene = node_elements(
+    let node_scene = crate::frame_profile::scoped("scene_nodes", || {
+    node_elements(
         renderer,
         request.resources.node_renderer,
         request.resources.ui_text,
@@ -646,7 +647,8 @@ pub fn build(
             shadow_renderer: request.resources.shadow_renderer,
             now: request.frame.target_presentation_time,
         },
-    )?;
+    )?
+    });
     elements.extend(node_scene.overlay);
 
     let mut stack = request
@@ -757,7 +759,7 @@ pub fn build(
         })
         .collect::<Result<Vec<_>, _>>()?;
     stack.extend(node_scene.groups);
-    let cluster_bloom = super::overlays::cluster_bloom::elements(
+    let cluster_bloom = crate::frame_profile::scoped("scene_bloom", || super::overlays::cluster_bloom::elements(
         renderer,
         super::overlays::cluster_bloom::BloomElementContext {
             output,
@@ -770,9 +772,9 @@ pub fn build(
             node_renderer: request.resources.node_renderer,
             ui_text: request.resources.ui_text,
         },
-    )?;
+    )?);
     elements.extend(cluster_bloom);
-    let cluster_overflow = super::overlays::cluster_overflow::elements(
+    let cluster_overflow = crate::frame_profile::scoped("scene_overflow", || super::overlays::cluster_overflow::elements(
         renderer,
         super::overlays::cluster_overflow::OverflowElementContext {
             output,
@@ -783,7 +785,7 @@ pub fn build(
             node_renderer: request.resources.node_renderer,
             ui_text: request.resources.ui_text,
         },
-    )?;
+    )?);
     elements.extend(cluster_overflow);
     let context = LiveWindowContext {
         space: request.desktop.space,
@@ -812,6 +814,7 @@ pub fn build(
     };
     let mut live_windows = Vec::new();
     let mut exclusive_windows = Vec::new();
+    let window_scene_start = std::time::Instant::now();
     for (stack_index, window) in request.desktop.space.elements().enumerate() {
         if !crate::wayland::window_is_on_output(window, output, primary_output) {
             continue;
@@ -895,12 +898,18 @@ pub fn build(
     // the scenes already built instead of recomputing window_visual_state per
     // window inside cluster_elements — that duplicated the most expensive
     // per-frame path (O(windows x cluster members)) for label obstacles.
+    if crate::frame_profile::enabled() {
+        eventline::debug!(
+            "halley-profile-section scene_windows={:.0}us",
+            window_scene_start.elapsed().as_secs_f64() * 1e6
+        );
+    }
     let live_window_rects: Vec<Rectangle<i32, Physical>> = live_windows
         .iter()
         .filter(|(_, scene)| scene.opening_alpha > 0.01)
         .map(|(_, scene)| scene.animated_rect)
         .collect();
-    let cluster_scene = cluster_elements(
+    let cluster_scene = crate::frame_profile::scoped("scene_clusters", || cluster_elements(
         renderer,
         request.resources.cluster_renderer,
         live_window_rects,
@@ -927,7 +936,7 @@ pub fn build(
             node_renderer: request.resources.node_renderer,
             ui_text: request.resources.ui_text,
         },
-    )?;
+    )?);
     stack.extend(cluster_scene);
 
     // A cluster workspace is one coherent stack. Preserve its position

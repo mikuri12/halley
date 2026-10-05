@@ -9,6 +9,7 @@ mod clusters;
 mod config;
 mod cursor;
 mod frame_clock;
+mod frame_profile;
 mod input;
 mod ipc;
 mod logging;

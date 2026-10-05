@@ -1456,13 +1456,14 @@ impl Renderable for TtyBackend {
                 .gpu_manager
                 .single_renderer(&self.primary_render_node)
                 .map_err(|err| format!("primary renderer unavailable: {err:?}"))?;
+            crate::frame_profile::scoped("scene_build", || {
             crate::render::scene::build(
                 renderer.as_mut(),
                 &entry_output,
                 &primary_output,
                 output_geometry,
                 request,
-            )?
+            )?})
         };
         if force_full_repaint {
             // Geometry animations (window open/close, zoom, camera motion)
@@ -1479,8 +1480,8 @@ impl Renderable for TtyBackend {
                 .gpu_manager
                 .single_renderer(&self.primary_render_node)
                 .map_err(|err| format!("primary renderer unavailable: {err:?}"))?;
-            let result =
-                self.drm_outputs[entry_index]
+            let result = crate::frame_profile::scoped("gpu_render_frame", || {
+            self.drm_outputs[entry_index]
                     .drm_output
                     .render_frame::<_, SceneElement>(
                         renderer.as_mut(),
@@ -1489,7 +1490,7 @@ impl Renderable for TtyBackend {
                         dmabuf::frame_flags_for_scene(elements.iter().any(
                             smithay::backend::renderer::element::Element::is_framebuffer_effect,
                         )),
-                    )?;
+                    )})?;
             if result.needs_sync()
                 && let PrimaryPlaneElement::Swapchain(element) = &result.primary_element
                 && let Err(err) = element.sync.wait()
