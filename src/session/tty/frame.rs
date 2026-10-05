@@ -209,7 +209,7 @@ impl OutputFrameState {
     /// reused; otherwise the caller receives the delay for one new timer.
     pub fn frame_skipped(&mut self, animating: bool, now: Duration) -> EstimatedVblankTimer {
         self.unfinished_animations = animating;
-        match std::mem::take(&self.redraw) {
+        match std::mem::take(&mut self.redraw) {
             RedrawState::Queued => {}
             RedrawState::WaitingForEstimatedVBlank(token)
             | RedrawState::WaitingForEstimatedVBlankAndQueued(token) => {
