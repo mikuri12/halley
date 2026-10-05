@@ -334,6 +334,7 @@ fn cursor_position<D: SessionDriver>(
                     decorations: &session.settings.decorations,
                     font: &session.settings.font,
                     focused: session.wayland.focused_window.as_ref(),
+                    geometry_cache: None,
                     now: crate::frame_clock::monotonic_now(),
                 },
                 session.pointer.position(),

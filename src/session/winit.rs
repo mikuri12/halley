@@ -266,6 +266,7 @@ pub fn run(explicit_config_path: Option<std::path::PathBuf>) {
         startup_clusters: super::startup_clusters::StartupClusters::default(),
         user_state: super::basics::UserState::load(),
         pointer: Pointer::new((100.0, 100.0)),
+        pointer_geometry_cache: crate::input::pointer::PointerGeometryCache::default(),
         cursor: CursorManager::new(&runtime_config.cursor),
         cursor_policy: super::cursor::Policy::new(&runtime_config.cursor, event_loop.handle()),
         publish_session_environment: false,

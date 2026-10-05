@@ -221,6 +221,7 @@ pub(super) fn route_client<D: SessionDriver>(
             decorations: &session.settings.decorations,
             font: &session.settings.font,
             focused: session.wayland.focused_window.as_ref(),
+            geometry_cache: Some(&session.pointer_geometry_cache),
             now: crate::frame_clock::monotonic_now(),
         },
         session.pointer.position(),

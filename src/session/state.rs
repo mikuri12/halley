@@ -130,6 +130,13 @@ pub struct Session<D: SessionDriver> {
     /// One-time onboarding state, persisted outside the configuration.
     pub(super) user_state: super::basics::UserState,
     pub pointer: Pointer,
+    /// Presentation geometry for pointer routing, memoized per presented
+    /// frame. Pointer motion runs at device rate (100-1000 Hz) while the
+    /// geometry only changes when a frame is presented; recomputing every
+    /// window's presentation for each motion event was the dominant CPU
+    /// cost of moving the cursor.
+    pub(crate) pointer_geometry_cache:
+        crate::input::pointer::PointerGeometryCache,
     pub cursor: CursorManager,
     pub(crate) cursor_policy: super::cursor::Policy<D>,
     pub(super) publish_session_environment: bool,

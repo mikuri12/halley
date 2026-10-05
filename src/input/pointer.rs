@@ -54,6 +54,46 @@ enum WindowHitKind {
     Any,
 }
 
+/// Frame-scoped memoization of the window presentation list used by pointer
+/// routing (`window_under`). Motion events arrive at device rate, so the
+/// per-window presentation is computed at most once per presented frame and
+/// reused for every motion event inside that frame. The key quantizes the
+/// sample time to half a 60 Hz frame; a new presented frame therefore gets a
+/// fresh computation while bursts of motion events inside one frame share it.
+#[derive(Debug, Default)]
+pub struct PointerGeometryCache {
+    frame: std::cell::Cell<Option<std::time::Duration>>,
+    entries: std::cell::RefCell<Vec<(WlSurface, WindowPresentation)>>,
+}
+
+/// Half of a 60 Hz frame — small enough to invalidate within any presented
+/// frame, large enough to batch device-rate motion bursts.
+const POINTER_GEOMETRY_FRAME_STEP_MS: u64 = 8;
+
+impl PointerGeometryCache {
+    fn frame_key(now: std::time::Duration) -> std::time::Duration {
+        let step = std::time::Duration::from_millis(POINTER_GEOMETRY_FRAME_STEP_MS);
+        now - (now % step)
+    }
+
+    /// Returns the memoized entries for the frame containing `frame`, building
+    /// them on the first request inside that frame.
+    pub fn entries_for(
+        &self,
+        now: std::time::Duration,
+        build: impl FnOnce() -> Vec<(WlSurface, WindowPresentation)>,
+    ) -> std::cell::Ref<'_, [(WlSurface, WindowPresentation)]> {
+        let frame = Self::frame_key(now);
+        if self.frame.get() != Some(frame) {
+            let mut entries = self.entries.borrow_mut();
+            *entries = build();
+            entries.shrink_to_fit();
+            self.frame.set(Some(frame));
+        }
+        std::cell::Ref::map(self.entries.borrow(), Vec::as_slice)
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct PointerRoutingContext<'a> {
     pub space: &'a Space<Window>,
@@ -68,6 +108,10 @@ pub struct PointerRoutingContext<'a> {
     pub font: &'a halley_config::Font,
     pub focused: Option<&'a WlSurface>,
     pub now: std::time::Duration,
+    /// Frame-scoped memoization for `window_under`. `None` disables caching
+    /// (one-shot callers like screencast); pointer-motion callers pass the
+    /// session cache so device-rate events reuse one computation per frame.
+    pub geometry_cache: Option<&'a PointerGeometryCache>,
 }
 
 /// Screen-space cursor tracking. Client-facing focus, buttons, implicit
@@ -380,6 +424,45 @@ fn layer_under(
 /// Presentation transforms differ, but stacking order does not. A separate
 /// fullscreen-first pass lets a fullscreen surface underneath a newly
 /// raised normal window steal axes and clicks through that window.
+/// Builds the per-window presentation list for one output. Shared by the
+/// cached and uncached paths of `window_under`.
+fn build_window_entries(
+    context: &PointerRoutingContext<'_>,
+    output: &Output,
+) -> Vec<(WlSurface, WindowPresentation)> {
+    context
+        .space
+        .elements()
+        .filter(|window| crate::wayland::window_is_on_output(window, output, context.primary))
+        .filter_map(|window| {
+            let presentation = build_window_presentation(context, window, output)?;
+            let surface = window.wl_surface()?.into_owned();
+            Some((surface, presentation))
+        })
+        .collect()
+}
+
+fn build_window_presentation(
+    context: &PointerRoutingContext<'_>,
+    window: &Window,
+    output: &Output,
+) -> Option<WindowPresentation> {
+    WindowPresentation::for_window(
+        context.space,
+        context.cameras,
+        Some(context.clusters),
+        Some(context.nodes),
+        context.window_animations,
+        context.fullscreen,
+        context.maximize,
+        context.decorations,
+        context.font,
+        window,
+        output,
+        context.now,
+    )
+}
+
 fn window_under(
     context: &PointerRoutingContext<'_>,
     output: &Output,
@@ -402,28 +485,32 @@ fn window_under(
     )
     .filter(|presentation| presentation.progress > 0.0);
 
+    // The per-window presentation list is the expensive part (cluster
+    // presentation walks members per window) and is identical for every
+    // motion event inside one presented frame. Memoize it per frame and
+    // clone the entries out so the rest of the routing borrows the context.
+    let entries = context
+        .geometry_cache
+        .map(|cache| cache.entries_for(context.now, || build_window_entries(context, output)));
     let mut windows = context
         .space
         .elements()
         .enumerate()
         .filter_map(|(stack_index, window)| {
-            if !crate::wayland::window_is_on_output(window, output, context.primary) {
-                return None;
-            }
-            let presentation = WindowPresentation::for_window(
-                context.space,
-                context.cameras,
-                Some(context.clusters),
-                Some(context.nodes),
-                context.window_animations,
-                context.fullscreen,
-                context.maximize,
-                context.decorations,
-                context.font,
-                window,
-                output,
-                context.now,
-            )?;
+            let surface = window.wl_surface()?;
+            let presentation = match entries.as_ref() {
+                Some(entries) => entries
+                    .iter()
+                    .find(|(cached_surface, _)| cached_surface == surface.as_ref())?
+                    .1
+                    .clone(),
+                None => {
+                    if !crate::wayland::window_is_on_output(window, output, context.primary) {
+                        return None;
+                    }
+                    build_window_presentation(context, window, output)?
+                }
+            };
             Some((stack_index, window, presentation))
         })
         .collect::<Vec<_>>();
