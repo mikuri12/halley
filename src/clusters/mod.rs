@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -167,6 +167,13 @@ pub struct ClusterSystem {
     label_hover: RefCell<HashMap<ClusterId, f32>>,
     overlay_hovered: Option<(String, NodeId)>,
     overlay_label_hover: RefCell<HashMap<NodeId, f32>>,
+    /// Frame-scoped memoization of `workspace_layout`. The layout depends only
+    /// on (cluster, work_area, members), but `window_presentation` runs it per
+    /// member window per frame — O(members^2) layout passes on the canvas.
+    /// The key quantizes time below one frame; mutation paths invalidate via
+    /// `invalidate_layout_cache` so structural changes never read a stale hit.
+    layout_cache: RefCell<HashMap<(ClusterId, Rectangle<i32, Logical>), Option<ClusterWorkspaceLayoutResult>>>,
+    layout_cache_frame: Cell<Option<Duration>>,
     creation: Option<CreationState>,
     pending_draft: Option<DraftBuild>,
     next_draft_id: u64,
@@ -197,6 +204,8 @@ impl ClusterSystem {
             label_hover: RefCell::new(HashMap::new()),
             overlay_hovered: None,
             overlay_label_hover: RefCell::new(HashMap::new()),
+            layout_cache: RefCell::new(HashMap::new()),
+            layout_cache_frame: Cell::new(None),
             creation: None,
             pending_draft: None,
             next_draft_id: 1,
@@ -214,6 +223,9 @@ impl ClusterSystem {
         let changed = self.config != config || self.animations != animations;
         self.config = config;
         self.animations = animations;
+        if changed {
+            self.invalidate_layout_cache();
+        }
         changed
     }
 
@@ -250,6 +262,7 @@ impl ClusterSystem {
     }
 
     pub fn move_core(&mut self, id: ClusterId, output: &str, position: Vec2) -> bool {
+        self.invalidate_layout_cache();
         if self.active.values().any(|active| *active == id) {
             return false;
         }
@@ -712,6 +725,7 @@ impl ClusterSystem {
         current_rect: Rectangle<i32, Logical>,
         now: Duration,
     ) -> Option<bool> {
+        self.invalidate_layout_cache();
         let cluster = self.active_on(output)?;
         if self.cluster_for_member(member) != Some(cluster)
             || self
@@ -794,6 +808,7 @@ impl ClusterSystem {
         work_area: Rectangle<i32, Logical>,
         now: Duration,
     ) -> bool {
+        self.invalidate_layout_cache();
         let Some(active) = self.active_on(output) else {
             return false;
         };
@@ -863,6 +878,7 @@ impl ClusterSystem {
         work_area: Rectangle<i32, Logical>,
         now: Duration,
     ) -> bool {
+        self.invalidate_layout_cache();
         if self.registry.is_cluster_member(member) {
             return false;
         }
@@ -916,7 +932,25 @@ impl ClusterSystem {
                 None => WindowPresentation::Field,
             };
         }
+        // Fast path for the collapsed canvas: a member whose cluster is not
+        // presented on this output is Hidden. Proving it needs only membership
+        // plus the output's active/transition state — the full layout walk
+        // below would otherwise run per member window on every canvas frame.
         let member_cluster = self.cluster_for_member(id);
+        if let Some(cluster) = member_cluster
+            && self.member_floats.rect_on(id, output).is_none()
+            && !self.member_floats.is_floating(id)
+            && !self.admission_floats.contains(&id)
+            && self
+                .metadata(cluster)
+                .is_some_and(|metadata| metadata.output == output)
+            && self.active_on(output).is_none()
+            && self.transitions.get(output).is_none_or(|transition| {
+                transition.cluster_id != cluster || !self.transition_is_live(transition, now)
+            })
+        {
+            return WindowPresentation::Hidden;
+        }
         if let Some(target) = self.member_floats.rect_on(id, output) {
             let Some(cluster) = member_cluster else {
                 return WindowPresentation::Hidden;
@@ -1238,6 +1272,7 @@ impl ClusterSystem {
         position: Vec2,
         now: Duration,
     ) -> bool {
+        self.invalidate_layout_cache();
         let ClusterDragMember {
             cluster_id: cluster,
             node_id: member,
@@ -1294,6 +1329,7 @@ impl ClusterSystem {
         origin: Rectangle<i32, Logical>,
         now: Duration,
     ) -> bool {
+        self.invalidate_layout_cache();
         let Some(cluster) = self.active_on(output) else {
             return false;
         };
@@ -1437,6 +1473,38 @@ impl ClusterSystem {
         id: ClusterId,
         work_area: Rectangle<i32, Logical>,
     ) -> Option<ClusterWorkspaceLayoutResult> {
+        // Frame-scoped memoization: the layout depends only on the cluster's
+        // members, the work area, and the config — none of which change inside
+        // one frame. `window_presentation` runs this per member window, so the
+        // layout pass was O(members^2) per frame on the canvas.
+        let frame = layout_cache_frame_key();
+        if self.layout_cache_frame.get() != Some(frame) {
+            self.layout_cache.borrow_mut().clear();
+            self.layout_cache_frame.set(Some(frame));
+        }
+        if let Some(cached) = self.layout_cache.borrow().get(&(id, work_area)) {
+            return cached.clone();
+        }
+        let result = self.compute_workspace_layout(id, work_area);
+        self.layout_cache
+            .borrow_mut()
+            .insert((id, work_area), result.clone());
+        result
+    }
+
+    /// Drops memoized layouts. Structural mutations (membership, floating
+    /// state, activate, config reload) call this so no reader inside the
+    /// current frame observes a stale hit.
+    pub(crate) fn invalidate_layout_cache(&self) {
+        self.layout_cache.borrow_mut().clear();
+        self.layout_cache_frame.set(None);
+    }
+
+    fn compute_workspace_layout(
+        &self,
+        id: ClusterId,
+        work_area: Rectangle<i32, Logical>,
+    ) -> Option<ClusterWorkspaceLayoutResult> {
         let cluster = self.registry.cluster(id)?;
         let metadata = self.metadata(id)?;
         let outer = self.config.tiling.gaps_outer_px.max(0.0);
@@ -1570,6 +1638,7 @@ impl ClusterSystem {
         position: Vec2,
         now: Duration,
     ) -> bool {
+        self.invalidate_layout_cache();
         use halley_core::cluster::ClusterRemoveMemberOutcome;
         use halley_core::field::{NodeState, Visibility};
 
@@ -1771,6 +1840,17 @@ fn member_at_point(
         );
         rect.contains(point).then_some(placement.node_id)
     })
+}
+
+
+/// Quantized frame key for the workspace-layout memoization. Matches the
+/// pointer-geometry cache step: any structural mutation also invalidates
+/// explicitly, so the quantization only bounds idle reuse.
+fn layout_cache_frame_key() -> Duration {
+    const STEP_MS: u64 = 8;
+    let step_ns = STEP_MS * 1_000_000;
+    let ns = crate::frame_clock::monotonic_now().as_nanos() as u64;
+    Duration::from_nanos(ns - ns % step_ns)
 }
 
 #[cfg(test)]
