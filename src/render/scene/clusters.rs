@@ -120,6 +120,7 @@ pub(super) fn cluster_elements(
         decorations,
         font,
     );
+    let obstacles_start = std::time::Instant::now();
     let mut fixed_label_obstacles = live_window_rects;
     fixed_label_obstacles.extend(
         nodes
@@ -137,6 +138,7 @@ pub(super) fn cluster_elements(
                 ))
             }),
     );
+    let core_obstacles_start = std::time::Instant::now();
     let core_label_obstacles = clusters
         .collapsed_core_landmarks()
         .into_iter()
@@ -157,6 +159,7 @@ pub(super) fn cluster_elements(
         .collect::<Vec<_>>();
 
     let mut groups = Vec::new();
+    let cluster_loop_start = std::time::Instant::now();
     for (_, id, metadata) in clusters.clusters_for_output(&output.name()) {
         let focused = focused_node.is_some_and(|node| {
             clusters.cluster_for_member(node) == Some(id)
@@ -339,6 +342,15 @@ pub(super) fn cluster_elements(
             order: id.as_u64(),
             elements,
         });
+    }
+    if crate::frame_profile::enabled() {
+        eventline::debug!(
+            "halley-profile-section clusters_loop={:.0}us obstacles={:.0}us core_obstacles={:.0}us n_clusters={}",
+            cluster_loop_start.elapsed().as_secs_f64() * 1e6,
+            obstacles_start.elapsed().as_secs_f64() * 1e6,
+            core_obstacles_start.elapsed().as_secs_f64() * 1e6,
+            groups.len(),
+        );
     }
     Ok(groups)
 }
