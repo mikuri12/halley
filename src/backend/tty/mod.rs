@@ -1488,9 +1488,12 @@ impl Renderable for TtyBackend {
                         renderer.as_mut(),
                         &elements,
                         clear,
-                        dmabuf::frame_flags_for_scene(elements.iter().any(
-                            smithay::backend::renderer::element::Element::is_framebuffer_effect,
-                        )),
+                        dmabuf::frame_flags_with_cursor(
+                            elements.iter().any(
+                                smithay::backend::renderer::element::Element::is_framebuffer_effect,
+                            ),
+                            request.cursor.hardware_plane,
+                        ),
                     )
             })?;
             if result.needs_sync()

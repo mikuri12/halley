@@ -1363,6 +1363,7 @@ fn redraw_output(app: &mut TtyApp, output: &Output, loop_handle: &LoopHandle<'_,
                 cursor_position: app.pointer.position(),
                 show_cursor,
                 cursor_override,
+                hardware_plane: app.cursor.hardware_plane(),
             },
             overlays: OverlayContext {
                 capture_overlay: app.capture.overlay(),

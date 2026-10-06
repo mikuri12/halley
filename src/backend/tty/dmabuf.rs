@@ -18,8 +18,18 @@ pub fn frame_flags() -> FrameFlags {
     FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY
 }
 
-pub fn frame_flags_for_scene(has_framebuffer_effect: bool) -> FrameFlags {
+pub fn frame_flags_with_cursor(
+    has_framebuffer_effect: bool,
+    cursor_hardware_plane: bool,
+) -> FrameFlags {
     let mut flags = frame_flags();
+    if cursor_hardware_plane {
+        // The DRM cursor plane updates the pointer atomically: mouse motion
+        // costs one atomic plane update instead of a full GLES redraw per
+        // frame. Smithay falls back to the primary composition automatically
+        // when the plane cannot host the cursor (wrong size/format/hidden).
+        flags.insert(FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT);
+    }
     if has_framebuffer_effect {
         // Direct scan-out of a window skips the backdrop blur behind it, so
         // the surface flickers between the client buffer and the composed
@@ -78,9 +88,24 @@ mod tests {
 
     #[test]
     fn framebuffer_effects_disable_primary_scanout() {
-        let flags = frame_flags_for_scene(true);
+        let flags = frame_flags_with_cursor(true, false);
         assert!(!flags.contains(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT));
         assert!(!flags.contains(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY));
-        assert!(frame_flags_for_scene(false).contains(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY));
+        assert!(
+            frame_flags_with_cursor(false, false)
+                .contains(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY)
+        );
+    }
+
+    #[test]
+    fn cursor_plane_flag_is_opt_in() {
+        let enabled = frame_flags_with_cursor(false, true);
+        assert!(enabled.contains(FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT));
+        let disabled = frame_flags_with_cursor(false, false);
+        assert!(!disabled.contains(FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT));
+        // Cursor plane and framebuffer effects are independent decisions.
+        let both = frame_flags_with_cursor(true, true);
+        assert!(both.contains(FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT));
+        assert!(!both.contains(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT));
     }
 }

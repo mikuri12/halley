@@ -141,6 +141,7 @@ fn save_region_inner<D: SessionDriver>(
                             cursor_position: pointer_position,
                             show_cursor: false,
                             cursor_override: None,
+                            hardware_plane: false,
                         },
                         overlays: OverlayContext {
                             capture_overlay: crate::capture::CaptureOverlay::None,
@@ -391,6 +392,7 @@ where
                     cursor_position: pointer_position,
                     show_cursor,
                     cursor_override: None,
+                    hardware_plane: false,
                 },
                 overlays: OverlayContext {
                     capture_overlay: crate::capture::CaptureOverlay::None,

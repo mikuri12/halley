@@ -230,6 +230,9 @@ pub struct CursorContext<'a> {
     pub cursor_position: (f64, f64),
     pub show_cursor: bool,
     pub cursor_override: Option<CursorIcon>,
+    /// Whether the DRM cursor plane may host the pointer element. False keeps
+    /// the composed software cursor (frame_flags_without_cursor_plane path).
+    pub hardware_plane: bool,
 }
 
 /// Shell-owned overlays and replacement scenes.

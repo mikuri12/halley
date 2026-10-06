@@ -101,6 +101,9 @@ pub struct CursorManager {
     /// False pins multi-frame themes to their first frame and stops the
     /// per-frame animation redraw timer (see `Cursor::animated`).
     animated: bool,
+    /// True allows the DRM cursor plane to host the pointer element (see
+    /// `Cursor::hardware_plane`).
+    hardware_plane: bool,
     image: CursorImageStatus,
     overrides: CursorOverrides,
     cache: RefCell<HashMap<(CursorIcon, i32), Rc<PreparedCursor>>>,
@@ -115,6 +118,7 @@ impl CursorManager {
             default_theme: CursorTheme::load("default"),
             size: config.size,
             animated: config.animated,
+            hardware_plane: config.hardware_plane,
             image: CursorImageStatus::default_named(),
             overrides: CursorOverrides::default(),
             cache: RefCell::new(HashMap::new()),
@@ -126,6 +130,7 @@ impl CursorManager {
         if self.theme_name == config.theme
             && self.size == config.size
             && self.animated == config.animated
+            && self.hardware_plane == config.hardware_plane
         {
             return false;
         }
@@ -134,8 +139,14 @@ impl CursorManager {
         self.default_theme = CursorTheme::load("default");
         self.size = config.size;
         self.animated = config.animated;
+        self.hardware_plane = config.hardware_plane;
         self.cache.get_mut().clear();
         true
+    }
+
+    /// Whether the DRM cursor plane may host the pointer element.
+    pub fn hardware_plane(&self) -> bool {
+        self.hardware_plane
     }
 
     pub fn frame(&self, icon: CursorIcon, output_scale: i32, time: Duration) -> Rc<CursorFrame> {

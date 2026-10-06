@@ -20,6 +20,11 @@ pub struct Cursor {
     /// timer, so animated cursors cost CPU even while the pointer is at rest;
     /// static cursors redraw only on real pointer motion.
     pub animated: bool,
+    /// When true, the DRM cursor plane renders the pointer: moving the mouse
+    /// becomes an atomic hardware update instead of a full GLES redraw per
+    /// frame. Falls back to the composed software cursor when the plane is
+    /// unavailable or the driver misbehaves.
+    pub hardware_plane: bool,
 }
 
 impl Default for Cursor {
@@ -32,6 +37,7 @@ impl Default for Cursor {
             hide_on_touch: true,
             hide_after_ms: Some(DEFAULT_HIDE_AFTER_MS),
             animated: true,
+            hardware_plane: true,
         }
     }
 }
@@ -67,6 +73,7 @@ pub fn parse_cursor(config: &RuneConfig) -> Cursor {
         hide_on_touch: config.get_or("cursor.hide-on-touch", defaults.hide_on_touch),
         hide_after_ms,
         animated: config.get_or("cursor.animated", defaults.animated),
+        hardware_plane: config.get_or("cursor.hardware-plane", defaults.hardware_plane),
     }
 }
 
@@ -100,6 +107,7 @@ end
                 hide_on_touch: false,
                 hide_after_ms: Some(750),
                 animated: true,
+                hardware_plane: true,
             }
         );
     }

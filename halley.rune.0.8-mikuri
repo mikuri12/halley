@@ -28,6 +28,11 @@ cursor:
   # completo del output (CPU alto al mover/idle). Estatico = redraw solo
   # con movimiento real del puntero.
   animated false
+
+  # Cursor por HARDWARE (DRM cursor plane): mover el mouse pasa a ser una
+  # actualizacion atomica del hardware, sin re-render completo del output
+  # por frame. Pone false si tu driver dibuja el cursor corrupto.
+  hardware-plane true
   hide-when-typing true
   hide-after-ms 2000
 end

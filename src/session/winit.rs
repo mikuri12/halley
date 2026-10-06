@@ -583,6 +583,8 @@ pub fn run(explicit_config_path: Option<std::path::PathBuf>) {
                             cursor_position: position,
                             show_cursor,
                             cursor_override,
+                            // winit has no DRM cursor plane; always composed.
+                            hardware_plane: false,
                         },
                         overlays: OverlayContext {
                             capture_overlay: app.capture.overlay(),
