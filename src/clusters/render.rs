@@ -373,19 +373,20 @@ impl ClusterRenderer {
         {
             return Ok(());
         }
-        let entry = match self.resources.remove(&icon_colors) {
-            // Shaders, white texture, and the GL context are color-independent:
-            // reuse them across palette variants so a palette change only
-            // re-rasterizes the two icon textures.
-            Some(mut existing) if existing.context == context => {
-                existing.icons = build_icons(renderer, icon_colors)?;
-                self.resources.insert(icon_colors, existing);
+        let icons = build_icons(renderer, icon_colors)?;
+        let existing = self.resources.get_mut(&icon_colors);
+        match existing {
+            // Shaders, the white texture, and the GL context are
+            // color-independent: reuse them across palette variants so a
+            // palette change only re-rasterizes the two icon textures.
+            Some(resources) if resources.context == context => {
+                resources.icons = icons;
                 return Ok(());
             }
-            Some(existing) => existing,
-            None => {
-                let texture =
-                    renderer.import_memory(&[255_u8; 4 * 4 * 4], Fourcc::Abgr8888, (4, 4).into(), false)?;
+            Some(resources) => {
+                resources.context = context;
+                resources.texture = renderer
+                    .import_memory(&[255_u8; 4 * 4 * 4], Fourcc::Abgr8888, (4, 4).into(), false)?;
                 let uniforms = [
                     UniformName::new("node_color", UniformType::_4f),
                     UniformName::new("fill_color", UniformType::_4f),
@@ -393,31 +394,35 @@ impl ClusterRenderer {
                     UniformName::new("center_flat_fill", UniformType::_1f),
                     UniformName::new("fill_alpha", UniformType::_1f),
                 ];
-                Resources {
-                    context,
-                    texture,
-                    circle: renderer.compile_custom_texture_shader(CIRCLE_SHADER, &uniforms)?,
-                    square: renderer.compile_custom_texture_shader(SQUARE_SHADER, &uniforms)?,
-                    icon_colors,
-                    icons: build_icons(renderer, icon_colors)?,
-                }
+                resources.circle =
+                    renderer.compile_custom_texture_shader(CIRCLE_SHADER, &uniforms)?;
+                resources.square =
+                    renderer.compile_custom_texture_shader(SQUARE_SHADER, &uniforms)?;
+                resources.icons = icons;
             }
-        };
-        let texture =
-            renderer.import_memory(&[255_u8; 4 * 4 * 4], Fourcc::Abgr8888, (4, 4).into(), false)?;
-        let uniforms = [
-            UniformName::new("node_color", UniformType::_4f),
-            UniformName::new("fill_color", UniformType::_4f),
-            UniformName::new("flat_fill", UniformType::_1f),
-            UniformName::new("center_flat_fill", UniformType::_1f),
-            UniformName::new("fill_alpha", UniformType::_1f),
-        ];
-        entry.context = context;
-        entry.texture = texture;
-        entry.circle = renderer.compile_custom_texture_shader(CIRCLE_SHADER, &uniforms)?;
-        entry.square = renderer.compile_custom_texture_shader(SQUARE_SHADER, &uniforms)?;
-        entry.icons = build_icons(renderer, icon_colors)?;
-        self.resources.insert(icon_colors, entry);
+            None => {
+                let texture = renderer
+                    .import_memory(&[255_u8; 4 * 4 * 4], Fourcc::Abgr8888, (4, 4).into(), false)?;
+                let uniforms = [
+                    UniformName::new("node_color", UniformType::_4f),
+                    UniformName::new("fill_color", UniformType::_4f),
+                    UniformName::new("flat_fill", UniformType::_1f),
+                    UniformName::new("center_flat_fill", UniformType::_1f),
+                    UniformName::new("fill_alpha", UniformType::_1f),
+                ];
+                self.resources.insert(
+                    icon_colors,
+                    Resources {
+                        context,
+                        texture,
+                        circle: renderer.compile_custom_texture_shader(CIRCLE_SHADER, &uniforms)?,
+                        square: renderer.compile_custom_texture_shader(SQUARE_SHADER, &uniforms)?,
+                        icon_colors,
+                        icons,
+                    },
+                );
+            }
+        }
         Ok(())
     }
 }
@@ -426,24 +431,21 @@ fn build_icons(
     renderer: &mut GlesRenderer,
     icon_colors: [[u8; 4]; 2],
 ) -> Result<[GlesTexture; 2], Box<dyn Error>> {
-    icon_colors
-        .map(|color| {
-            let raster = raster_icon(color).ok_or("cluster SVG could not be rasterized")?;
-            renderer
-                .import_memory(
-                    raster.as_raw(),
-                    Fourcc::Abgr8888,
-                    (ICON_SIZE as i32, ICON_SIZE as i32).into(),
-                    false,
-                )
-                .map_err(|error| -> Box<dyn Error> { Box::new(error) })
-        })
-        .map_err(|icons: [Result<GlesTexture, Box<dyn Error>>; 2]| {
-            icons
-                .into_iter()
-                .find_map(|icon| icon.err())
-                .unwrap_or_else(|| "cluster icons could not be imported".into())
-        })
+    let mut built = Vec::with_capacity(icon_colors.len());
+    for color in icon_colors {
+        let raster = raster_icon(color).ok_or("cluster SVG could not be rasterized")?;
+        let texture = renderer.import_memory(
+            raster.as_raw(),
+            Fourcc::Abgr8888,
+            (ICON_SIZE as i32, ICON_SIZE as i32).into(),
+            false,
+        )?;
+        built.push(texture);
+    }
+    Ok([
+        built.pop().ok_or("cluster icons could not be imported")?,
+        built.pop().ok_or("cluster icons could not be imported")?,
+    ])
 }
 
 fn join_ready_border_fraction(destination: Rectangle<i32, Physical>) -> f32 {
