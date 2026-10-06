@@ -1412,6 +1412,7 @@ impl Renderable for TtyBackend {
         output: &Output,
         request: RenderRequest<'_>,
     ) -> Result<RenderOutcome, Box<dyn Error>> {
+        let cursor_hardware_plane = request.cursor.hardware_plane;
         let primary_output = self.primary_output.clone();
         let entry_index = self
             .drm_outputs
@@ -1492,7 +1493,7 @@ impl Renderable for TtyBackend {
                             elements.iter().any(
                                 smithay::backend::renderer::element::Element::is_framebuffer_effect,
                             ),
-                            request.cursor.hardware_plane,
+                            cursor_hardware_plane,
                         ),
                     )
             })?;
