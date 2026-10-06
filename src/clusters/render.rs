@@ -35,7 +35,12 @@ struct Resources {
 
 #[derive(Default)]
 pub struct ClusterRenderer {
-    resources: Option<Resources>,
+    /// Resources memoized per icon-color pair. The old single-slot cache
+    /// re-rasterized the cluster SVGs (usvg parse + resvg render + two GL
+    /// shader compiles) whenever two clusters with different highlight
+    /// states alternated within one frame — ~17 ms per scene build on an
+    /// HD 530. Both palette variants stay resident instead.
+    resources: HashMap<[[u8; 4]; 2], Resources>,
     edit_context: Option<ContextId<GlesTexture>>,
     edit_color: Option<[u8; 4]>,
     edit_texture: Option<GlesTexture>,
@@ -166,8 +171,12 @@ impl ClusterRenderer {
         shape: halley_config::ClusterCoreShape,
     ) -> Result<ClusterCoreElement, Box<dyn Error>> {
         let id = self.dynamic_id(0);
-        self.ensure(renderer, [[255; 4]; 2])?;
-        let resources = self.resources.as_ref().expect("resources ensured above");
+        let white = [[255_u8; 4]; 2];
+        self.ensure(renderer, white)?;
+        let resources = self
+            .resources
+            .get(&white)
+            .expect("resources ensured above");
         let program = match shape {
             halley_config::ClusterCoreShape::Circle => resources.circle.clone(),
             halley_config::ClusterCoreShape::Square => resources.square.clone(),
@@ -222,7 +231,10 @@ impl ClusterRenderer {
     ) -> Result<ClusterIconElement, Box<dyn Error>> {
         let id = self.dynamic_id(1);
         self.ensure(renderer, colors)?;
-        let resources = self.resources.as_ref().expect("resources ensured above");
+        let resources = self
+            .resources
+            .get(&colors)
+            .expect("resources ensured above");
         let texture = resources.icons[usize::from(focused)].clone();
         let source = Rectangle::<f64, Logical>::new(
             (0.0, 0.0).into(),
@@ -354,11 +366,43 @@ impl ClusterRenderer {
         icon_colors: [[u8; 4]; 2],
     ) -> Result<(), Box<dyn Error>> {
         let context = renderer.context_id();
-        if self.resources.as_ref().is_some_and(|resources| {
-            resources.context == context && resources.icon_colors == icon_colors
-        }) {
+        if self
+            .resources
+            .get(&icon_colors)
+            .is_some_and(|resources| resources.context == context)
+        {
             return Ok(());
         }
+        let entry = match self.resources.remove(&icon_colors) {
+            // Shaders, white texture, and the GL context are color-independent:
+            // reuse them across palette variants so a palette change only
+            // re-rasterizes the two icon textures.
+            Some(mut existing) if existing.context == context => {
+                existing.icons = build_icons(renderer, icon_colors)?;
+                self.resources.insert(icon_colors, existing);
+                return Ok(());
+            }
+            Some(existing) => existing,
+            None => {
+                let texture =
+                    renderer.import_memory(&[255_u8; 4 * 4 * 4], Fourcc::Abgr8888, (4, 4).into(), false)?;
+                let uniforms = [
+                    UniformName::new("node_color", UniformType::_4f),
+                    UniformName::new("fill_color", UniformType::_4f),
+                    UniformName::new("flat_fill", UniformType::_1f),
+                    UniformName::new("center_flat_fill", UniformType::_1f),
+                    UniformName::new("fill_alpha", UniformType::_1f),
+                ];
+                Resources {
+                    context,
+                    texture,
+                    circle: renderer.compile_custom_texture_shader(CIRCLE_SHADER, &uniforms)?,
+                    square: renderer.compile_custom_texture_shader(SQUARE_SHADER, &uniforms)?,
+                    icon_colors,
+                    icons: build_icons(renderer, icon_colors)?,
+                }
+            }
+        };
         let texture =
             renderer.import_memory(&[255_u8; 4 * 4 * 4], Fourcc::Abgr8888, (4, 4).into(), false)?;
         let uniforms = [
@@ -368,9 +412,22 @@ impl ClusterRenderer {
             UniformName::new("center_flat_fill", UniformType::_1f),
             UniformName::new("fill_alpha", UniformType::_1f),
         ];
-        let circle = renderer.compile_custom_texture_shader(CIRCLE_SHADER, &uniforms)?;
-        let square = renderer.compile_custom_texture_shader(SQUARE_SHADER, &uniforms)?;
-        let [unfocused, focused] = icon_colors.map(|color| {
+        entry.context = context;
+        entry.texture = texture;
+        entry.circle = renderer.compile_custom_texture_shader(CIRCLE_SHADER, &uniforms)?;
+        entry.square = renderer.compile_custom_texture_shader(SQUARE_SHADER, &uniforms)?;
+        entry.icons = build_icons(renderer, icon_colors)?;
+        self.resources.insert(icon_colors, entry);
+        Ok(())
+    }
+}
+
+fn build_icons(
+    renderer: &mut GlesRenderer,
+    icon_colors: [[u8; 4]; 2],
+) -> Result<[GlesTexture; 2], Box<dyn Error>> {
+    icon_colors
+        .map(|color| {
             let raster = raster_icon(color).ok_or("cluster SVG could not be rasterized")?;
             renderer
                 .import_memory(
@@ -380,17 +437,13 @@ impl ClusterRenderer {
                     false,
                 )
                 .map_err(|error| -> Box<dyn Error> { Box::new(error) })
-        });
-        self.resources = Some(Resources {
-            context,
-            texture,
-            circle,
-            square,
-            icon_colors,
-            icons: [unfocused?, focused?],
-        });
-        Ok(())
-    }
+        })
+        .map_err(|icons: [Result<GlesTexture, Box<dyn Error>>; 2]| {
+            icons
+                .into_iter()
+                .find_map(|icon| icon.err())
+                .unwrap_or_else(|| "cluster icons could not be imported".into())
+        })
 }
 
 fn join_ready_border_fraction(destination: Rectangle<i32, Physical>) -> f32 {
